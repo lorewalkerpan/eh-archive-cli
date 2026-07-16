@@ -3,9 +3,9 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { Command } from "commander";
 import { AdaptiveLimiter, type AdaptiveEvent, type AdaptiveSnapshot } from "./adaptive.js";
-import { clearCookie, defaultConfigPath, loadConfig, normalizeCookieInput, saveCookie } from "./config.js";
+import { clearCookie, defaultConfigPath, loadConfig, normalizeCookieInput, saveCookie, saveProxy } from "./config.js";
 import { downloadArchive, getGalleryPreview, listFavorites, normalizeGalleryUrl, resolveArchive, searchGalleries, type ArchiveKind, type GalleryPreview } from "./core.js";
-import { useEnvironmentProxy } from "./proxy.js";
+import { useProxySetting } from "./proxy.js";
 
 type CookieCommandOptions = {
   cookieEnv: string;
@@ -60,18 +60,20 @@ const program = new Command();
 program
   .name("eharchive")
   .description("下载你有权访问的图库归档 ZIP")
-  .version("0.9.1")
+  .version("0.9.2")
   .option("--config <path>", "本机 Cookie 配置文件路径", defaultConfigPath())
   .option("--no-proxy", "不使用系统或环境代理，改为直接连接")
   .showHelpAfterError();
 
 let networkConfigured = false;
 const networkCommands = new Set(["download", "batch", "retry", "list", "search", "preview"]);
-program.hook("preAction", (_thisCommand, actionCommand) => {
+program.hook("preAction", async (_thisCommand, actionCommand) => {
   if (!networkCommands.has(actionCommand.name())) return;
   if (networkConfigured) return;
   networkConfigured = true;
-  if (program.opts().proxy !== false) useEnvironmentProxy();
+  if (program.opts().proxy === false) return;
+  const configured = await loadConfig(program.opts().config);
+  useProxySetting(configured.proxy ?? "system");
 });
 
 function qualityOption(command: Command): Command {
@@ -508,10 +510,16 @@ config.command("set-cookie")
     await saveCookie(program.opts().config, cookie);
     process.stdout.write(`Cookie 已保存到 ${program.opts().config}\n`);
   });
+config.command("set-proxy <mode-or-url>")
+  .description("持久化代理：system、direct 或 HTTP(S) 代理地址")
+  .action(async (modeOrUrl: string) => {
+    const proxy = await saveProxy(program.opts().config, modeOrUrl);
+    process.stdout.write(`代理已保存为 ${proxy}\n`);
+  });
 config.command("show").description("显示配置状态，不会显示 Cookie 内容").action(async () => {
   const configured = await loadConfig(program.opts().config);
   const cookieValid = configured.cookie ? Boolean(normalizeCandidate({ value: configured.cookie, source: "config" })) : false;
-  process.stdout.write(JSON.stringify({ path: program.opts().config, cookieConfigured: cookieValid }, null, 2) + "\n");
+  process.stdout.write(JSON.stringify({ path: program.opts().config, cookieConfigured: cookieValid, proxy: configured.proxy ?? "system" }, null, 2) + "\n");
 });
 config.command("clear").description("删除已保存的 Cookie").action(async () => {
   await clearCookie(program.opts().config);

@@ -40,11 +40,20 @@ On Windows, you can pipe a clipboard value instead:
 Get-Clipboard | eharchive config set-cookie --stdin
 ```
 
-The saved local configuration contains the Cookie. Do not commit or share it; remove it with `eharchive config clear`. Non-interactive environments such as pipes and CI never wait for secret input: save it first with `config set-cookie --stdin`, or use `--cookie-file` temporarily.
+The saved local configuration contains the Cookie. Do not commit or share it; `eharchive config clear` removes only the Cookie and preserves the saved proxy policy. Non-interactive environments such as pipes and CI never wait for secret input: save it first with `config set-cookie --stdin`, or use `--cookie-file` temporarily.
 
 ## System proxy
 
-The CLI automatically uses `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` from the system environment; no Node flags are required. To force a direct connection for one command, put the root option first:
+The CLI automatically uses `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` from the system environment; no Node flags are required. You can also persist a policy locally:
+
+```powershell
+eharchive config set-proxy system                  # use system proxy (default)
+eharchive config set-proxy direct                  # always connect directly
+eharchive config set-proxy http://127.0.0.1:7890   # fixed HTTP(S) proxy
+eharchive config show
+```
+
+To force a direct connection for one command, put the root option first:
 
 ```powershell
 eharchive --no-proxy favorites list

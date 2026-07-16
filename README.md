@@ -41,11 +41,20 @@ eharchive config show
 Get-Clipboard | eharchive config set-cookie --stdin
 ```
 
-配置文件含有登录 Cookie，请勿上传、共享或提交到 Git；Unix 系统会限制为仅当前用户可读写。使用 `eharchive config clear` 可删除该配置。管道、CI 等非交互环境不会等待输入；请先用 `config set-cookie --stdin` 保存，或临时传入 `--cookie-file`。
+配置文件含有登录 Cookie，请勿上传、共享或提交到 Git；Unix 系统会限制为仅当前用户可读写。`eharchive config clear` 只删除 Cookie，保留已保存的代理策略。管道、CI 等非交互环境不会等待输入；请先用 `config set-cookie --stdin` 保存，或临时传入 `--cookie-file`。
 
 ## 系统代理
 
-默认自动使用系统环境中的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 和 `NO_PROXY`，无需额外设置 Node 参数。需要临时直连时，将根选项放在命令前：
+默认自动使用系统环境中的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 和 `NO_PROXY`，无需额外设置 Node 参数。也可将策略持久化到本机配置：
+
+```powershell
+eharchive config set-proxy system                  # 使用系统代理（默认）
+eharchive config set-proxy direct                  # 始终直连
+eharchive config set-proxy http://127.0.0.1:7890   # 固定使用指定 HTTP(S) 代理
+eharchive config show
+```
+
+需要仅对一次命令直连时，将根选项放在命令前：
 
 ```powershell
 eharchive --no-proxy favorites list

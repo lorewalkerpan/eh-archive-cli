@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 export interface StoredConfig {
   cookie?: string;
+  proxy?: string;
 }
 
 /** Converts browser/devtools Cookie text into a single HTTP Cookie header value. */
@@ -50,23 +51,57 @@ export async function loadConfig(path: string): Promise<StoredConfig> {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
     if (!parsed || typeof parsed !== "object") return {};
     const cookie = (parsed as { cookie?: unknown }).cookie;
-    return typeof cookie === "string" && cookie.trim() ? { cookie: cookie.trim() } : {};
+    const proxy = (parsed as { proxy?: unknown }).proxy;
+    return {
+      ...(typeof cookie === "string" && cookie.trim() ? { cookie: cookie.trim() } : {}),
+      ...(typeof proxy === "string" && proxy.trim() ? { proxy: proxy.trim() } : {})
+    };
   } catch (error: unknown) {
     if ((error as { code?: string }).code === "ENOENT") return {};
     throw new Error(`Cannot read config file: ${path}`);
   }
 }
 
-export async function saveCookie(path: string, cookie: string): Promise<void> {
-  const normalizedCookie = normalizeCookieInput(cookie);
+export function normalizeProxySetting(value: string): string {
+  const setting = value.trim();
+  if (setting === "system" || setting === "direct") return setting;
+  let url: URL;
+  try {
+    url = new URL(setting);
+  } catch {
+    throw new Error("Proxy must be system, direct, or an HTTP(S) proxy URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Proxy URL must use http:// or https://.");
+  }
+  return url.toString();
+}
+
+async function writeConfig(path: string, config: StoredConfig): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.part`;
-  await writeFile(temporary, `${JSON.stringify({ cookie: normalizedCookie }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await writeFile(temporary, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   await rename(temporary, path);
   // On POSIX this limits the file to its owner. Windows keeps the user's AppData ACL.
   await chmod(path, 0o600);
 }
 
+export async function saveCookie(path: string, cookie: string): Promise<void> {
+  const normalizedCookie = normalizeCookieInput(cookie);
+  await writeConfig(path, { ...(await loadConfig(path)), cookie: normalizedCookie });
+}
+
+export async function saveProxy(path: string, proxy: string): Promise<string> {
+  const normalizedProxy = normalizeProxySetting(proxy);
+  await writeConfig(path, { ...(await loadConfig(path)), proxy: normalizedProxy });
+  return normalizedProxy;
+}
+
 export async function clearCookie(path: string): Promise<void> {
+  const config = await loadConfig(path);
+  if (config.proxy) {
+    await writeConfig(path, { proxy: config.proxy });
+    return;
+  }
   await rm(path, { force: true });
 }

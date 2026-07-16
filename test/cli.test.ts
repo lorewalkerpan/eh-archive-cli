@@ -5,13 +5,16 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-function runCli(arguments_: string[]): Promise<{ code: number | null; stderr: string }> {
+function runCli(arguments_: string[], input?: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, [resolve("dist/src/cli.js"), ...arguments_], { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(process.execPath, [resolve("dist/src/cli.js"), ...arguments_], { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
     let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", reject);
-    child.on("close", (code) => resolvePromise({ code, stderr }));
+    child.on("close", (code) => resolvePromise({ code, stdout, stderr }));
+    child.stdin.end(input);
   });
 }
 
@@ -47,6 +50,19 @@ test("explains how to configure a missing Cookie in a non-interactive terminal",
     assert.equal(result.code, 1);
     assert.match(result.stderr, /未检测到已保存的 Cookie/);
     assert.match(result.stderr, /--stdin/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("imports complete multiline Cookie values through standard input", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "eharchive-cli-import-"));
+  const configPath = join(directory, "config.json");
+  try {
+    const result = await runCli(["--config", configPath, "config", "set-cookie", "--stdin"], "ipb_member_id: 1\nipb_pass_hash: example\nigneous: null\n");
+    assert.equal(result.code, 0);
+    const saved = JSON.parse(await readFile(configPath, "utf8")) as { cookie?: string };
+    assert.equal(saved.cookie, "ipb_member_id=1; ipb_pass_hash=example");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

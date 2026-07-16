@@ -17,9 +17,9 @@ eharchive --help
 
 ## Configure a Cookie
 
-On the first command that requires a Cookie (such as `download` or `favorites list`), the CLI checks the local configuration. If none exists in an interactive terminal, it asks you to paste one: input is hidden, never added to shell history, and then saved for later commands.
+On the first command that requires a Cookie (such as `download` or `favorites list`), the CLI checks the local configuration. If none exists in an interactive terminal, it asks separately for `ipb_member_id`, `ipb_pass_hash`, and optionally `igneous`: every value is hidden, never added to shell history, and then saved for later commands.
 
-You may paste browser-exported multiline `key: value` data; the CLI converts it to a normal Cookie header. Both `ipb_member_id` and `ipb_pass_hash` are required. A single `ipb_member_id` is incomplete and is rejected; `igneous: null` is ignored.
+Both `ipb_member_id` and `ipb_pass_hash` are required; `igneous` may be skipped. Environment variables, files, and `--stdin` still accept browser-exported multiline `key: value` data and convert it to a normal Cookie header while ignoring `igneous: null`.
 
 The default location is always `%APPDATA%\eharchive\config.json` on Windows. It is outside npm's global installation directory, so normal upgrades and reinstalls do not remove it. Check its location and state at any time:
 

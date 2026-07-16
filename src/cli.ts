@@ -59,7 +59,7 @@ const program = new Command();
 program
   .name("eharchive")
   .description("下载你有权访问的图库归档 ZIP")
-  .version("0.8.0")
+  .version("0.9.0")
   .option("--config <path>", "本机 Cookie 配置文件路径", defaultConfigPath())
   .showHelpAfterError();
 
@@ -169,9 +169,15 @@ async function readHiddenInput(prompt: string): Promise<string> {
 async function promptAndSaveCookie(): Promise<string> {
   const configPath = program.opts().config;
   process.stderr.write(`未检测到已保存的 Cookie。配置将保存到 ${configPath}；此位置独立于 npm 安装目录，升级不会删除它。\n`);
-  const cookie = await readHiddenInput("请粘贴完整 Cookie（支持多行和 key: value 格式）后按 Enter（输入不会回显，也不会写入命令历史）：");
-  if (!cookie) throw new Error("Cookie 不能为空。可重新运行命令，或使用 `eharchive config set-cookie --stdin`。" );
-  const normalizedCookie = normalizeCookieInput(cookie);
+  process.stderr.write("请依次输入浏览器 Cookie 中对应字段的值；每项输入都不会回显，也不会写入命令历史。\n");
+  const memberId = await readHiddenInput("ipb_member_id: ");
+  const passHash = await readHiddenInput("ipb_pass_hash: ");
+  const igneous = await readHiddenInput("igneous（可选，直接按 Enter 跳过）: ");
+  const normalizedCookie = normalizeCookieInput([
+    `ipb_member_id=${memberId}`,
+    `ipb_pass_hash=${passHash}`,
+    igneous ? `igneous=${igneous}` : ""
+  ].filter(Boolean).join("; "));
   await saveCookie(configPath, normalizedCookie);
   process.stderr.write("Cookie 已安全保存；后续命令会自动使用该配置。\n");
   return normalizedCookie;
@@ -483,8 +489,11 @@ config.command("set-cookie")
       ? await readStandardInput()
       : options.cookieFile
         ? (await readFile(options.cookieFile, "utf8")).trim()
-        : process.env[options.cookieEnv]?.trim() ?? await readHiddenInput("请粘贴完整 Cookie（支持多行和 key: value 格式）后按 Enter（输入不会回显，也不会写入命令历史）：");
-    if (!cookie) throw new Error(`未找到 Cookie。请先设置 ${options.cookieEnv}，或使用 --cookie-file / --stdin。`);
+        : process.env[options.cookieEnv]?.trim();
+    if (!cookie) {
+      await promptAndSaveCookie();
+      return;
+    }
     await saveCookie(program.opts().config, cookie);
     process.stdout.write(`Cookie 已保存到 ${program.opts().config}\n`);
   });

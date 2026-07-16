@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 export interface StoredConfig {
   cookie?: string;
   proxy?: string;
+  logLevel?: "simple" | "verbose" | "none";
 }
 
 /** Converts browser/devtools Cookie text into a single HTTP Cookie header value. */
@@ -52,9 +53,11 @@ export async function loadConfig(path: string): Promise<StoredConfig> {
     if (!parsed || typeof parsed !== "object") return {};
     const cookie = (parsed as { cookie?: unknown }).cookie;
     const proxy = (parsed as { proxy?: unknown }).proxy;
+    const logLevel = (parsed as { logLevel?: unknown }).logLevel;
     return {
       ...(typeof cookie === "string" && cookie.trim() ? { cookie: cookie.trim() } : {}),
-      ...(typeof proxy === "string" && proxy.trim() ? { proxy: proxy.trim() } : {})
+      ...(typeof proxy === "string" && proxy.trim() ? { proxy: proxy.trim() } : {}),
+      ...(logLevel === "simple" || logLevel === "verbose" || logLevel === "none" ? { logLevel } : {})
     };
   } catch (error: unknown) {
     if ((error as { code?: string }).code === "ENOENT") return {};
@@ -97,10 +100,18 @@ export async function saveProxy(path: string, proxy: string): Promise<string> {
   return normalizedProxy;
 }
 
+export async function saveLogLevel(path: string, logLevel: "simple" | "verbose" | "none"): Promise<void> {
+  await writeConfig(path, { ...(await loadConfig(path)), logLevel });
+}
+
 export async function clearCookie(path: string): Promise<void> {
   const config = await loadConfig(path);
   if (config.proxy) {
-    await writeConfig(path, { proxy: config.proxy });
+    await writeConfig(path, { proxy: config.proxy, ...(config.logLevel ? { logLevel: config.logLevel } : {}) });
+    return;
+  }
+  if (config.logLevel) {
+    await writeConfig(path, { logLevel: config.logLevel });
     return;
   }
   await rm(path, { force: true });

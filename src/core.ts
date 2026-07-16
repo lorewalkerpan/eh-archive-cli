@@ -3,6 +3,7 @@ import { mkdir, rename, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { logDebug, logError, safeUrl } from "./log.js";
 
 export type ArchiveKind = "original" | "resampled";
 
@@ -142,7 +143,15 @@ function requestHeaders(options: ResolveOptions, requestUrl: string, referer?: s
 }
 
 async function getText(url: string, options: ResolveOptions, referer?: string): Promise<{ html: string; url: string }> {
-  const response = await fetch(url, { headers: requestHeaders(options, url, referer), redirect: "follow" });
+  logDebug(`GET ${safeUrl(url)}`);
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: requestHeaders(options, url, referer), redirect: "follow" });
+  } catch (error) {
+    logError(`GET failed ${safeUrl(url)}: ${error instanceof Error ? error.message : String(error)}`);
+    throw error;
+  }
+  logDebug(`GET ${safeUrl(url)} -> ${response.status}`);
   if (!response.ok) throw new Error(`Request failed (${response.status}) for ${new URL(url).pathname}`);
   const finalUrl = response.url;
   const path = new URL(finalUrl).pathname.toLowerCase();
@@ -408,7 +417,9 @@ async function fetchDownloadWithRetry(url: string, headers: Headers, retries: nu
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      logDebug(`ZIP attempt ${attempt + 1}/${retries + 1} ${safeUrl(url)}`);
       const response = await fetch(url, { headers, redirect: "follow", signal: controller.signal });
+      logDebug(`ZIP attempt ${attempt + 1}/${retries + 1} -> ${response.status}`);
       if (!isRetryableStatus(response.status) || attempt === retries) {
         return { response, clearTimeout: () => clearTimeout(timer) };
       }

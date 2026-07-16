@@ -1,6 +1,6 @@
 {
   "name": "@lorewalkerpan/eh-archive-cli",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Command-line archive downloader for content you are authorized to download.",
   "license": "GPL-3.0-or-later",
   "type": "module",
@@ -13,6 +13,7 @@
   "files": [
     "dist",
     "README.md",
+    "README.en.md",
     "LICENSE",
     "NOTICE.md"
   ],

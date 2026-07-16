@@ -14,9 +14,13 @@ export interface ResolveOptions {
 export interface DownloadOptions extends ResolveOptions {
   onProgress?: (downloaded: number, total?: number) => void;
   overwrite?: boolean;
+  resume?: boolean;
+  retries?: number;
+  timeoutMs?: number;
 }
 
-const defaultUserAgent = "eh-archive-cli/0.1.0 (+https://github.com/lorewalkerpan/eh-archive-cli)";
+const defaultUserAgent = "eh-archive-cli (+https://github.com/lorewalkerpan/eh-archive-cli)";
+const galleryHosts = new Set(["e-hentai.org", "exhentai.org"]);
 
 function decodeHtml(value: string): string {
   return value.replace(/&amp;/gi, "&").replace(/&#x27;/gi, "'").replace(/&quot;/gi, '"');
@@ -28,6 +32,17 @@ function absoluteUrl(value: string, base: string): string {
   return url.toString();
 }
 
+function isGalleryHost(url: URL): boolean {
+  return galleryHosts.has(url.hostname.toLowerCase());
+}
+
+function assertGalleryUrl(url: URL): void {
+  if (!isGalleryHost(url)) throw new Error("Gallery URLs must use e-hentai.org or exhentai.org.");
+  if (!/^\/g\/\d+\/[a-z0-9]+\/?$/i.test(url.pathname)) {
+    throw new Error("Gallery URL must have the form https://e-hentai.org/g/ID/Token/.");
+  }
+}
+
 /** Converts the compact `gallery-id/token` form into a normal gallery URL. */
 export function normalizeGalleryUrl(value: string): string {
   const input = value.trim();
@@ -36,18 +51,21 @@ export function normalizeGalleryUrl(value: string): string {
   if (/^\d+$/.test(input)) {
     throw new Error("A gallery ID also needs its Token. Use ID/Token, for example 2724315/34536084b4.");
   }
-  return absoluteUrl(input, input);
+  const url = new URL(absoluteUrl(input, input));
+  assertGalleryUrl(url);
+  return url.toString();
 }
 
-function requestHeaders(options: ResolveOptions, referer?: string): Headers {
+function requestHeaders(options: ResolveOptions, requestUrl: string, referer?: string): Headers {
   const headers = new Headers({ "user-agent": options.userAgent ?? defaultUserAgent });
-  if (options.cookie) headers.set("cookie", options.cookie);
+  // Cookies are only sent to the trusted gallery hosts. Signed ZIP URLs do not need them.
+  if (options.cookie && isGalleryHost(new URL(requestUrl))) headers.set("cookie", options.cookie);
   if (referer) headers.set("referer", referer);
   return headers;
 }
 
 async function getText(url: string, options: ResolveOptions, referer?: string): Promise<{ html: string; url: string }> {
-  const response = await fetch(url, { headers: requestHeaders(options, referer), redirect: "follow" });
+  const response = await fetch(url, { headers: requestHeaders(options, url, referer), redirect: "follow" });
   if (!response.ok) throw new Error(`Request failed (${response.status}) for ${new URL(url).pathname}`);
   const finalUrl = response.url;
   const path = new URL(finalUrl).pathname.toLowerCase();
@@ -103,7 +121,7 @@ export async function resolveArchive(galleryUrl: string, kind: ArchiveKind, opti
   const post = await fetch(offerUrl, {
     method: "POST",
     headers: new Headers({
-      ...Object.fromEntries(requestHeaders(options, archivePage)),
+      ...Object.fromEntries(requestHeaders(options, offerUrl, archivePage)),
       origin,
       "content-type": "application/x-www-form-urlencoded"
     }),
@@ -134,30 +152,88 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function totalFromResponse(response: Response, offset: number): number | undefined {
+  const contentRange = response.headers.get("content-range");
+  const rangedTotal = /\/([0-9]+)$/.exec(contentRange ?? "")?.[1];
+  if (rangedTotal) return Number(rangedTotal);
+  const contentLength = response.headers.get("content-length");
+  return contentLength && /^\d+$/.test(contentLength) ? offset + Number(contentLength) : undefined;
+}
+
+async function fetchDownloadWithRetry(url: string, headers: Headers, retries: number, timeoutMs: number): Promise<{ response: Response; clearTimeout: () => void }> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { headers, redirect: "follow", signal: controller.signal });
+      if (!isRetryableStatus(response.status) || attempt === retries) {
+        return { response, clearTimeout: () => clearTimeout(timer) };
+      }
+      clearTimeout(timer);
+      await response.body?.cancel();
+      await delay(500 * 2 ** attempt);
+    } catch (error) {
+      clearTimeout(timer);
+      lastError = error;
+      if (attempt === retries) break;
+      await delay(500 * 2 ** attempt);
+    }
+  }
+  throw new Error(`ZIP download request failed after ${retries + 1} attempt(s): ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+
 export async function downloadArchive(directUrl: string, outputPath: string, options: DownloadOptions = {}): Promise<DownloadResult> {
   await mkdir(dirname(outputPath), { recursive: true });
-  if (await exists(outputPath)) {
-    if (!options.overwrite) return "skipped";
+  const temporaryPath = `${outputPath}.part`;
+  if (await exists(outputPath) && !options.overwrite) return "skipped";
+
+  const retries = options.retries ?? 3;
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  if (!Number.isInteger(retries) || retries < 0) throw new Error("Retry count must be a non-negative integer.");
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1_000) throw new Error("Timeout must be at least 1000 milliseconds.");
+
+  if (options.resume === false) await rm(temporaryPath, { force: true });
+  let offset = options.resume === false ? 0 : (await exists(temporaryPath) ? (await stat(temporaryPath)).size : 0);
+  const headers = requestHeaders(options, directUrl);
+  if (offset > 0) headers.set("range", `bytes=${offset}-`);
+  let request = await fetchDownloadWithRetry(directUrl, headers, retries, timeoutMs);
+
+  // Some hosts ignore or reject Range. Start a clean file instead of appending a duplicate ZIP.
+  if (offset > 0 && (request.response.status === 200 || request.response.status === 416)) {
+    request.clearTimeout();
+    await rm(temporaryPath, { force: true });
+    offset = 0;
+    request = await fetchDownloadWithRetry(directUrl, requestHeaders(options, directUrl), retries, timeoutMs);
   }
-  const response = await fetch(directUrl, { headers: requestHeaders(options), redirect: "follow" });
-  if (!response.ok || !response.body) throw new Error(`ZIP download failed (${response.status}).`);
-  const totalHeader = response.headers.get("content-length");
-  const total = totalHeader && /^\d+$/.test(totalHeader) ? Number(totalHeader) : undefined;
-  let downloaded = 0;
-  const source = Readable.fromWeb(response.body as never);
+  if (!request.response.ok || !request.response.body) {
+    request.clearTimeout();
+    throw new Error(`ZIP download failed (${request.response.status}).`);
+  }
+
+  const total = totalFromResponse(request.response, offset);
+  let downloaded = offset;
+  const source = Readable.fromWeb(request.response.body as never);
   source.on("data", (chunk: Buffer) => {
     downloaded += chunk.length;
     options.onProgress?.(downloaded, total);
   });
-  const temporaryPath = `${outputPath}.part`;
-  await rm(temporaryPath, { force: true });
   try {
-    await pipeline(source, createWriteStream(temporaryPath));
+    await pipeline(source, createWriteStream(temporaryPath, { flags: offset > 0 ? "a" : "w" }));
+    request.clearTimeout();
     if (await exists(outputPath)) await rm(outputPath, { force: true });
     await rename(temporaryPath, outputPath);
     return "downloaded";
   } catch (error) {
-    await rm(temporaryPath, { force: true });
+    request.clearTimeout();
     throw error;
   }
 }

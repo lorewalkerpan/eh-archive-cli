@@ -1,6 +1,8 @@
 # eh-archive-cli
 
-一个用于下载你有权访问的图库归档 ZIP 的 Node.js 命令行工具。支持单本、批量队列、并发下载、Cookie 本机配置和安全覆盖更新。
+[English](README.en.md) | 中文
+
+用于下载你有权访问的图库归档 ZIP 的 Node.js 命令行工具。支持单本、批量队列、断点续传、失败重试、Cookie 本机配置和安全覆盖更新。
 
 > 本工具不会绕过登录、访问控制、配额或内容限制。请仅下载和保存你拥有相应权利的内容。
 
@@ -13,9 +15,9 @@ npm install -g @lorewalkerpan/eh-archive-cli
 eharchive --help
 ```
 
-## 推荐：保存 Cookie 一次，后续直接下载
+## Cookie 设置
 
-Cookie 不会出现在命令历史中。先把 Cookie 放入环境变量，再保存到本机配置：
+Cookie 不会出现在命令历史或命令输出中。推荐先把 Cookie 放到环境变量，再保存到本机配置：
 
 ```powershell
 $env:EH_COOKIE = "ipb_member_id=...; ipb_pass_hash=..."
@@ -23,55 +25,72 @@ eharchive config set-cookie --cookie-env EH_COOKIE
 eharchive config show
 ```
 
-默认配置文件位于 Windows 的 `%APPDATA%\eharchive\config.json`；它含有登录 Cookie，请勿上传、共享或提交到 Git。可用 `eharchive config clear` 删除。
-
-也可不保存 Cookie，而是在每次执行时使用环境变量或文件：
+也可从剪贴板经标准输入传入，避免手动粘贴进命令行：
 
 ```powershell
-eharchive download "https://example.invalid/g/123/token/" --cookie-env EH_COOKIE
-eharchive download "https://example.invalid/g/123/token/" --cookie-file .\cookies.txt
+Get-Clipboard | eharchive config set-cookie --stdin
+```
+
+默认配置文件位于 Windows 的 `%APPDATA%\eharchive\config.json`。它含有登录 Cookie，请勿上传、共享或提交到 Git；Unix 系统会限制为仅当前用户可读写。使用 `eharchive config clear` 可删除该配置。
+
+无需保存 Cookie 时，可在每次执行中使用环境变量或文件：
+
+```powershell
+eharchive download "https://e-hentai.org/g/123/token/" --cookie-env EH_COOKIE
+eharchive download "https://e-hentai.org/g/123/token/" --cookie-file .\cookies.txt
 ```
 
 ## 下载单个图库
 
 ```powershell
-eharchive download "https://example.invalid/g/123/token/" --quality original --out .\downloads
+eharchive download "https://e-hentai.org/g/123/token/" --quality original --out .\downloads
 ```
 
-完整 URL 也可简写为 `图库 ID/Token`，例如：
+完整 URL 也可简写为 `图库 ID/Token`：
 
 ```powershell
 eharchive download "2724315/34536084b4" --out .\downloads
 ```
 
-不能只提供纯数字 ID：站点还要求对应的 Token；只有 ID 的路径会返回 404。批量清单中同样可以混用完整 URL 和 `ID/Token`。
+纯数字 ID 不足以下载：站点还要求对应 Token。完整 URL 仅接受 `e-hentai.org` 或 `exhentai.org` 的图库路径。
 
-- `--quality original|resampled`：选择原图或压缩版本。
-- `--out <目录>`：输出目录，默认 `downloads`。
-- `--name <文件名>`：自定义 ZIP 文件名。
-- `--overwrite`：同名 ZIP 已存在时重新下载并在成功后覆盖；默认跳过已有文件。
+常用选项：
 
-下载时先写入 `.part` 临时文件，只有完整下载成功后才会替换正式 ZIP，避免覆盖时留下损坏文件。
+- `--quality original|resampled`：原图或压缩版本。
+- `--out <目录>`、`--name <文件名>`：输出位置和 ZIP 名称。
+- `--overwrite`：完整 ZIP 已存在时重新下载，并在成功后安全替换。
+- `--retries <次数>`：请求失败后的重试次数，默认 `3`。
+- `--timeout <秒>`：每次 ZIP 请求的超时，默认 `60` 秒。
+- `--no-resume`：不续传已有 `.part` 文件。
 
-## 批量下载
+下载先写入 `.part`。出现网络中断时保留该文件，下次默认从断点续传；只有完整下载成功后才替换正式 ZIP。登录 Cookie 只发送给受信任的图库域名，不会随 ZIP 直链发出。
 
-新建一个 UTF-8 文本文件，例如 `galleries.txt`。每行一个图库链接，空行和 `#` 开头的注释会忽略：
+## 批量下载与失败重试
+
+新建 UTF-8 文本文件 `galleries.txt`；每行一个完整图库 URL 或 `ID/Token`，空行与 `#` 开头的注释会忽略：
 
 ```text
 # 我的下载列表
-https://example.invalid/g/123/token-a/
-https://example.invalid/g/456/token-b/
+2724315/34536084b4
+https://e-hentai.org/g/456/token-b/
 ```
 
-执行：
+执行并生成报告：
 
 ```powershell
-eharchive batch .\galleries.txt --quality original --out .\downloads --concurrency 2
+eharchive batch .\galleries.txt --quality original --out .\downloads --concurrency 2 --delay 1 --report .\batch-report.json
 ```
 
-- `--concurrency 1` 到 `8`：并行任务数，默认 `2`；建议从低并发开始。
-- `--overwrite`：批量重新下载已有 ZIP。
-- 任一任务失败不会停止其余任务；命令最后会输出下载、跳过和失败数量，并以非零状态码标识存在失败。
+- `--concurrency 1` 到 `8`：并行任务数，默认 `2`。
+- `--delay <秒>`：每次任务启动之间的最小间隔，默认 `1`；建议保留或提高该值。
+- `--report <文件>`：生成不含 Cookie 的 JSON 报告，记录下载、跳过与失败项目。
+- 单项失败不会停止其余任务，命令会以非零状态码提示存在失败。
+
+只重试报告中的失败项目：
+
+```powershell
+eharchive retry .\batch-report.json --out .\downloads --report .\retry-report.json
+```
 
 ## 开发与发布
 
@@ -81,7 +100,7 @@ npm test
 npm run pack:check
 ```
 
-发布通过 GitHub Release 触发 npm Trusted Publishing，无需在仓库或 CI 中保存 npm Token。
+PR 会自动运行测试和 npm 打包检查。发布通过 GitHub Release 触发 npm Trusted Publishing；Release 标签必须与 `package.json` 版本匹配。
 
 ## 许可证
 

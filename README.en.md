@@ -65,6 +65,27 @@ eharchive batch .\galleries.txt --out .\downloads --concurrency 2 --delay 1 --re
 eharchive retry .\batch-report.json --out .\downloads --report .\retry-report.json
 ```
 
+## View and export cloud favorites
+
+Use the configured Cookie to view the current account's cloud favorites. One page is fetched by default:
+
+```powershell
+eharchive favorites list
+eharchive favorites list --category 0 --pages 3
+eharchive favorites list --search "keyword" --json
+```
+
+`--category` accepts `0` through `9`; `--all` follows all pages up to a limit of 100. Use `--site exhentai` when the account has access to that site.
+
+Export a batch-compatible `ID/Token` list and download it directly:
+
+```powershell
+eharchive favorites list --category 0 --all --export .\favorites-0.txt
+eharchive batch .\favorites-0.txt --out .\downloads --concurrency 2
+```
+
+Favorites output and exported lists never contain the Cookie. This command is read-only and does not alter cloud favorites.
+
 ## Development and publishing
 
 ```powershell

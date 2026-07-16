@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { Command } from "commander";
 import { clearCookie, defaultConfigPath, loadConfig, saveCookie } from "./config.js";
-import { downloadArchive, resolveArchive, type ArchiveKind } from "./core.js";
+import { downloadArchive, normalizeGalleryUrl, resolveArchive, type ArchiveKind } from "./core.js";
 
 type DownloadCommandOptions = {
   quality: ArchiveKind;
@@ -18,7 +18,7 @@ const program = new Command();
 program
   .name("eharchive")
   .description("下载你有权访问的图库归档 ZIP")
-  .version("0.2.0")
+  .version("0.2.1")
   .option("--config <path>", "本机 Cookie 配置文件路径", defaultConfigPath())
   .showHelpAfterError();
 
@@ -56,14 +56,15 @@ async function fileExists(path: string): Promise<boolean> {
 
 async function downloadOne(galleryUrl: string, options: DownloadCommandOptions, progressPrefix = ""): Promise<"downloaded" | "skipped"> {
   if (options.quality !== "original" && options.quality !== "resampled") throw new Error("--quality 必须是 original 或 resampled");
-  const outputPath = resolve(options.out, options.name ?? defaultFilename(galleryUrl));
+  const normalizedGalleryUrl = normalizeGalleryUrl(galleryUrl);
+  const outputPath = resolve(options.out, options.name ?? defaultFilename(normalizedGalleryUrl));
   if (await fileExists(outputPath) && !options.overwrite) {
     process.stderr.write(`${progressPrefix}跳过已存在文件：${basename(outputPath)}（使用 --overwrite 可覆盖）\n`);
     return "skipped";
   }
   const cookie = await getCookie(options);
   process.stderr.write(`${progressPrefix}解析归档链接…\n`);
-  const directUrl = await resolveArchive(galleryUrl, options.quality, { cookie });
+  const directUrl = await resolveArchive(normalizedGalleryUrl, options.quality, { cookie });
   let lastReport = 0;
   const result = await downloadArchive(directUrl, outputPath, {
     cookie,

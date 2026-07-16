@@ -28,6 +28,17 @@ function absoluteUrl(value: string, base: string): string {
   return url.toString();
 }
 
+/** Converts the compact `gallery-id/token` form into a normal gallery URL. */
+export function normalizeGalleryUrl(value: string): string {
+  const input = value.trim();
+  const compact = /^(\d+)\/([a-z0-9]+)\/?$/i.exec(input);
+  if (compact) return `https://e-hentai.org/g/${compact[1]}/${compact[2]}/`;
+  if (/^\d+$/.test(input)) {
+    throw new Error("A gallery ID also needs its Token. Use ID/Token, for example 2724315/34536084b4.");
+  }
+  return absoluteUrl(input, input);
+}
+
 function requestHeaders(options: ResolveOptions, referer?: string): Headers {
   const headers = new Headers({ "user-agent": options.userAgent ?? defaultUserAgent });
   if (options.cookie) headers.set("cookie", options.cookie);
@@ -79,7 +90,8 @@ export function parseDirectUrl(html: string, baseUrl: string): string | undefine
 }
 
 export async function resolveArchive(galleryUrl: string, kind: ArchiveKind, options: ResolveOptions = {}): Promise<string> {
-  const gallery = await getText(absoluteUrl(galleryUrl, galleryUrl), options, galleryUrl);
+  const normalizedGalleryUrl = normalizeGalleryUrl(galleryUrl);
+  const gallery = await getText(normalizedGalleryUrl, options, normalizedGalleryUrl);
   const archivePage = parseArchivePageUrl(gallery.html, gallery.url);
   if (!archivePage) throw new Error("No Archive Download entry was found on the gallery page.");
 

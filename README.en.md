@@ -59,7 +59,7 @@ Create a UTF-8 list with one URL or `ID/Token` per line; blank lines and lines b
 eharchive batch .\galleries.txt --out .\downloads --concurrency 2 --delay 1 --report .\batch-report.json
 ```
 
-`--delay` controls the minimum time between task starts. The JSON report contains outcomes but never Cookies. Retry only the failures with:
+`--delay` controls the minimum time between task starts. Adaptive concurrency is enabled by default: rate-limit responses such as `429`/`503` and timeouts reduce concurrency and apply a cooldown; stable successes gradually restore it. Use `--no-adaptive` to disable this behavior. The JSON report contains outcomes but never Cookies. Retry only the failures with:
 
 ```powershell
 eharchive retry .\batch-report.json --out .\downloads --report .\retry-report.json

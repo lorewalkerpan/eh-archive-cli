@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { downloadArchive, normalizeGalleryUrl, parseArchiveOffer, parseArchivePageUrl, parseContinuationUrl, parseDirectUrl, parseFavoritesPage } from "../src/core.js";
+import { downloadArchive, normalizeGalleryUrl, parseArchiveOffer, parseArchivePageUrl, parseContinuationUrl, parseDirectUrl, parseFavoritesPage, searchGalleries } from "../src/core.js";
 
 test("accepts a compact gallery ID and Token", () => {
   assert.equal(normalizeGalleryUrl("2724315/34536084b4"), "https://e-hentai.org/g/2724315/34536084b4/");
@@ -45,6 +45,12 @@ test("parses favorite categories, gallery references, and pagination", () => {
     title: "Example & Gallery"
   }]);
   assert.equal(result.nextPage, "https://e-hentai.org/favorites.php?favcat=0&next=123-456");
+});
+
+test("rejects invalid search options before making a request", async () => {
+  await assert.rejects(searchGalleries({ query: "" }), /Search query cannot be empty/);
+  await assert.rejects(searchGalleries({ query: "example", pages: 0 }), /Search pages must be an integer/);
+  await assert.rejects(searchGalleries({ query: "example", minPages: 10, maxPages: 1 }), /Minimum pages cannot exceed/);
 });
 
 test("retries and resumes a ZIP download without forwarding the Cookie", async () => {

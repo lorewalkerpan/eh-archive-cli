@@ -51,6 +51,22 @@ Useful options:
 
 Cookies are only sent to trusted gallery hosts and are not forwarded to ZIP download hosts.
 
+## Search preview
+
+Search previews results without downloading them. Titles and tags are searched by default; public search previews can run without a Cookie.
+
+```powershell
+eharchive search "artist:example" --pages 2
+eharchive search "keyword" --title-only --min-rating 3 --json
+```
+
+Use `--description`, `--torrents`, `--min-pages`, and `--max-pages` for additional filtering. Export results and then explicitly batch-download them:
+
+```powershell
+eharchive search "keyword" --pages 3 --export .\search-results.txt
+eharchive batch .\search-results.txt --out .\downloads
+```
+
 ## Batch download
 
 Create a UTF-8 list with one URL or `ID/Token` per line; blank lines and lines beginning with `#` are ignored.

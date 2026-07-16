@@ -25,12 +25,14 @@ export interface FavoriteCategory {
   name: string;
 }
 
-export interface FavoriteItem {
+export interface GalleryPreviewItem {
   id: string;
   token: string;
   url: string;
   title: string;
 }
+
+export type FavoriteItem = GalleryPreviewItem;
 
 export interface FavoritesOptions extends ResolveOptions {
   category?: number;
@@ -44,6 +46,24 @@ export interface FavoritesResult {
   items: FavoriteItem[];
   pagesFetched: number;
   nextPage?: string;
+}
+
+export interface SearchOptions extends ResolveOptions {
+  query: string;
+  pages?: number;
+  site?: "e-hentai" | "exhentai";
+  title?: boolean;
+  tags?: boolean;
+  description?: boolean;
+  torrents?: boolean;
+  minRating?: number;
+  minPages?: number;
+  maxPages?: number;
+}
+
+export interface SearchResult {
+  items: GalleryPreviewItem[];
+  pagesFetched: number;
 }
 
 const defaultUserAgent = "eh-archive-cli (+https://github.com/lorewalkerpan/eh-archive-cli)";
@@ -106,15 +126,8 @@ async function getText(url: string, options: ResolveOptions, referer?: string): 
   return { html: await response.text(), url: finalUrl };
 }
 
-export function parseFavoritesPage(html: string, baseUrl: string): { categories: FavoriteCategory[]; items: FavoriteItem[]; nextPage?: string } {
-  const categories: FavoriteCategory[] = [];
-  const categoryPattern = /onclick=[^>]*favorites\.php\?favcat=(\d+)[\s\S]{0,700}?<div\b[^>]*>\s*(\d+)\s*<\/div>[\s\S]{0,700}?title=["']([^"']+)["'][\s\S]{0,700}?<div\b[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
-  for (const match of html.matchAll(categoryPattern)) {
-    const slot = Number(match[1]);
-    if (slot >= 0 && slot <= 9) categories.push({ slot, count: Number(match[2]), name: textFromHtml(match[4]) || decodeHtml(match[3]) });
-  }
-
-  const items: FavoriteItem[] = [];
+export function parseGalleryPreviewItems(html: string, baseUrl: string): GalleryPreviewItem[] {
+  const items: GalleryPreviewItem[] = [];
   const seen = new Set<string>();
   const galleryPattern = /<a\b[^>]*href=["']([^"']*\/g\/(\d+)\/([a-z0-9]+)\/?[^"']*)["'][^>]*>([\s\S]{0,5000}?)<\/a>/gi;
   for (const match of html.matchAll(galleryPattern)) {
@@ -128,6 +141,18 @@ export function parseFavoritesPage(html: string, baseUrl: string): { categories:
     seen.add(id);
     items.push({ id, token, url, title });
   }
+  return items;
+}
+
+export function parseFavoritesPage(html: string, baseUrl: string): { categories: FavoriteCategory[]; items: FavoriteItem[]; nextPage?: string } {
+  const categories: FavoriteCategory[] = [];
+  const categoryPattern = /onclick=[^>]*favorites\.php\?favcat=(\d+)[\s\S]{0,700}?<div\b[^>]*>\s*(\d+)\s*<\/div>[\s\S]{0,700}?title=["']([^"']+)["'][\s\S]{0,700}?<div\b[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
+  for (const match of html.matchAll(categoryPattern)) {
+    const slot = Number(match[1]);
+    if (slot >= 0 && slot <= 9) categories.push({ slot, count: Number(match[2]), name: textFromHtml(match[4]) || decodeHtml(match[3]) });
+  }
+
+  const items = parseGalleryPreviewItems(html, baseUrl);
 
   const next = /<a\b[^>]*\bid=["'](?:dnext|unext)["'][^>]*\bhref=["']([^"']+)["']/i.exec(html)?.[1];
   return { categories, items, nextPage: next ? absoluteUrl(next, baseUrl) : undefined };
@@ -177,6 +202,55 @@ export async function listFavorites(options: FavoritesOptions = {}): Promise<Fav
     currentUrl = nextPage ?? "";
   }
   return { categories, items, pagesFetched, nextPage };
+}
+
+export async function searchGalleries(options: SearchOptions): Promise<SearchResult> {
+  const query = options.query.trim();
+  if (!query) throw new Error("Search query cannot be empty.");
+  const pages = options.pages ?? 1;
+  if (!Number.isInteger(pages) || pages < 1 || pages > 100) throw new Error("Search pages must be an integer from 1 to 100.");
+  const site = options.site ?? "e-hentai";
+  if (site !== "e-hentai" && site !== "exhentai") throw new Error("Search site must be e-hentai or exhentai.");
+  for (const [name, value] of [["Minimum rating", options.minRating], ["Minimum pages", options.minPages], ["Maximum pages", options.maxPages]] as const) {
+    if (value !== undefined && (!Number.isInteger(value) || value < 0)) throw new Error(`${name} must be a non-negative integer.`);
+  }
+  if (options.minRating !== undefined && options.minRating > 5) throw new Error("Minimum rating must be from 0 to 5.");
+  if (options.minPages !== undefined && options.maxPages !== undefined && options.minPages > options.maxPages) {
+    throw new Error("Minimum pages cannot exceed maximum pages.");
+  }
+
+  const origin = site === "e-hentai" ? "https://e-hentai.org" : "https://exhentai.org";
+  const items: GalleryPreviewItem[] = [];
+  const seen = new Set<string>();
+  for (let pageIndex = 0; pageIndex < pages; pageIndex += 1) {
+    const url = new URL("/", origin);
+    url.searchParams.set("f_search", query);
+    url.searchParams.set("advsearch", "1");
+    if (options.title !== false) url.searchParams.set("f_sname", "on");
+    if (options.tags !== false) url.searchParams.set("f_stags", "on");
+    if (options.description) url.searchParams.set("f_sdesc", "on");
+    if (options.torrents) url.searchParams.set("f_storr", "on");
+    if (options.minRating !== undefined) {
+      url.searchParams.set("f_sr", "on");
+      url.searchParams.set("f_srdd", String(options.minRating));
+    }
+    if (options.minPages !== undefined || options.maxPages !== undefined) {
+      url.searchParams.set("f_sp", "on");
+      url.searchParams.set("f_spf", options.minPages === undefined ? "" : String(options.minPages));
+      url.searchParams.set("f_spt", options.maxPages === undefined ? "" : String(options.maxPages));
+    }
+    if (pageIndex > 0) url.searchParams.set("page", String(pageIndex));
+    const page = await getText(url.toString(), options, url.toString());
+    const parsed = parseGalleryPreviewItems(page.html, page.url);
+    for (const item of parsed) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        items.push(item);
+      }
+    }
+    if (!parsed.length) return { items, pagesFetched: pageIndex + 1 };
+  }
+  return { items, pagesFetched: pages };
 }
 
 export function parseArchivePageUrl(html: string, baseUrl: string): string | undefined {

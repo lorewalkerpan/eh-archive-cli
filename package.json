@@ -5,10 +5,10 @@
   "license": "GPL-3.0-or-later",
   "type": "module",
   "bin": {
-    "eharchive": "./dist/cli.js"
+    "eharchive": "./dist/src/cli.js"
   },
   "exports": {
-    ".": "./dist/core.js"
+    ".": "./dist/src/core.js"
   },
   "files": [
     "dist",

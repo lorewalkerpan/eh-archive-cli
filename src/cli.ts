@@ -4,7 +4,7 @@ import { basename, dirname, resolve } from "node:path";
 import { Command } from "commander";
 import { AdaptiveLimiter, type AdaptiveEvent, type AdaptiveSnapshot } from "./adaptive.js";
 import { clearCookie, defaultConfigPath, loadConfig, saveCookie } from "./config.js";
-import { downloadArchive, listFavorites, normalizeGalleryUrl, resolveArchive, searchGalleries, type ArchiveKind } from "./core.js";
+import { downloadArchive, getGalleryPreview, listFavorites, normalizeGalleryUrl, resolveArchive, searchGalleries, type ArchiveKind, type GalleryPreview } from "./core.js";
 
 type CookieCommandOptions = {
   cookieEnv: string;
@@ -44,11 +44,17 @@ type BatchReport = {
   entries: BatchEntry[];
 };
 
+type PreviewCommandOptions = CookieCommandOptions & {
+  images: string;
+  out: string;
+  json?: boolean;
+};
+
 const program = new Command();
 program
   .name("eharchive")
   .description("下载你有权访问的图库归档 ZIP")
-  .version("0.5.0")
+  .version("0.6.0")
   .option("--config <path>", "本机 Cookie 配置文件路径", defaultConfigPath())
   .showHelpAfterError();
 
@@ -178,6 +184,39 @@ function searchOptions(command: Command): Command {
     .option("--max-pages <count>", "最多页数")
     .option("--json", "以 JSON 输出")
     .option("--export <path>", "导出为可传给 batch 的 ID/Token 清单");
+}
+
+function previewOptions(command: Command): Command {
+  return command
+    .option("--cookie-env <variable>", "Optional Cookie environment variable", "EH_COOKIE")
+    .option("--cookie-file <path>", "Optional UTF-8 Cookie file")
+    .option("--images <count>", "Number of default thumbnails to show (1-20)", "20")
+    .option("-o, --out <path>", "Output HTML path", "previews")
+    .option("--json", "Print preview metadata as JSON without writing HTML");
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character] ?? character);
+}
+
+function previewFilename(galleryUrl: string): string {
+  const parts = new URL(galleryUrl).pathname.split("/").filter(Boolean);
+  return `${parts[1] ?? "gallery"}.html`;
+}
+
+function previewHtml(preview: GalleryPreview): string {
+  const cover = preview.coverUrl
+    ? `<img class="cover" src="${escapeHtml(preview.coverUrl)}" alt="${escapeHtml(preview.title)} cover" loading="eager">`
+    : "";
+  const cards = preview.thumbnails.map((thumbnail) => `
+    <a class="thumb" href="${escapeHtml(thumbnail.pageUrl)}" target="_blank" rel="noopener noreferrer">
+      <img src="${escapeHtml(thumbnail.thumbnailUrl)}" alt="${escapeHtml(thumbnail.label)}" loading="lazy">
+      <span>${thumbnail.page}</span>
+    </a>`).join("");
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>${escapeHtml(preview.title)}</title>
+<style>body{margin:0 auto;max-width:1200px;padding:24px;font:16px system-ui,sans-serif;background:#161616;color:#eee}header{display:flex;gap:20px;align-items:start;margin-bottom:24px}.cover{width:180px;max-height:260px;object-fit:cover;border-radius:8px;background:#292929}h1{font-size:1.35rem;margin:0 0 10px;line-height:1.35}p{color:#bbb;margin:0}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.thumb{position:relative;display:block;aspect-ratio:3/2;background:#292929;border-radius:6px;overflow:hidden}.thumb img{width:100%;height:100%;object-fit:cover;display:block}.thumb span{position:absolute;right:6px;bottom:6px;padding:2px 6px;border-radius:4px;background:#000b;color:#fff;font-size:.8rem}@media(max-width:560px){body{padding:16px}header{gap:14px}.cover{width:120px;max-height:180px}}</style></head>
+<body><header>${cover}<div><h1>${escapeHtml(preview.title)}</h1><p>Cover and the first ${preview.thumbnails.length} default gallery thumbnails. Images are referenced remotely; this file contains no Cookie.</p></div></header><main class="grid">${cards}</main></body></html>\n`;
 }
 
 function reportAdaptiveEvent(event: AdaptiveEvent): void {
@@ -331,6 +370,22 @@ searchOptions(program.command("search <query>").description("搜索图库并预�
   });
 
 const config = program.command("config").description("管理本机 Cookie 配置（Cookie 不会打印到终端）");
+previewOptions(program.command("preview <gallery-url>").description("Create a local HTML preview with the cover and first 20 default thumbnails"))
+  .action(async (galleryUrl: string, options: PreviewCommandOptions) => {
+    const images = nonNegativeInteger(options.images, "--images");
+    if (images < 1 || images > 20) throw new Error("--images must be an integer from 1 to 20.");
+    const preview = await getGalleryPreview(galleryUrl, { cookie: await findCookie(options) }, images);
+    if (options.json) {
+      process.stdout.write(JSON.stringify(preview, null, 2) + "\n");
+      return;
+    }
+    const requestedPath = resolve(options.out);
+    const outputPath = requestedPath.toLowerCase().endsWith(".html") ? requestedPath : resolve(requestedPath, previewFilename(preview.galleryUrl));
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, previewHtml(preview), "utf8");
+    process.stdout.write(`${outputPath}\n`);
+  });
+
 config.command("set-cookie")
   .description("从环境变量、本地文件或标准输入保存 Cookie")
   .option("--cookie-env <variable>", "环境变量名", "EH_COOKIE")

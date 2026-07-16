@@ -19,11 +19,42 @@ export interface DownloadOptions extends ResolveOptions {
   timeoutMs?: number;
 }
 
+export interface FavoriteCategory {
+  slot: number;
+  count: number;
+  name: string;
+}
+
+export interface FavoriteItem {
+  id: string;
+  token: string;
+  url: string;
+  title: string;
+}
+
+export interface FavoritesOptions extends ResolveOptions {
+  category?: number;
+  pages?: number;
+  search?: string;
+  site?: "e-hentai" | "exhentai";
+}
+
+export interface FavoritesResult {
+  categories: FavoriteCategory[];
+  items: FavoriteItem[];
+  pagesFetched: number;
+  nextPage?: string;
+}
+
 const defaultUserAgent = "eh-archive-cli (+https://github.com/lorewalkerpan/eh-archive-cli)";
 const galleryHosts = new Set(["e-hentai.org", "exhentai.org"]);
 
 function decodeHtml(value: string): string {
   return value.replace(/&amp;/gi, "&").replace(/&#x27;/gi, "'").replace(/&quot;/gi, '"');
+}
+
+function textFromHtml(value: string): string {
+  return decodeHtml(value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim());
 }
 
 function absoluteUrl(value: string, base: string): string {
@@ -73,6 +104,79 @@ async function getText(url: string, options: ResolveOptions, referer?: string): 
     throw new Error("The site redirected to login. Set an authorized Cookie via --cookie-env or --cookie-file.");
   }
   return { html: await response.text(), url: finalUrl };
+}
+
+export function parseFavoritesPage(html: string, baseUrl: string): { categories: FavoriteCategory[]; items: FavoriteItem[]; nextPage?: string } {
+  const categories: FavoriteCategory[] = [];
+  const categoryPattern = /onclick=[^>]*favorites\.php\?favcat=(\d+)[\s\S]{0,700}?<div\b[^>]*>\s*(\d+)\s*<\/div>[\s\S]{0,700}?title=["']([^"']+)["'][\s\S]{0,700}?<div\b[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
+  for (const match of html.matchAll(categoryPattern)) {
+    const slot = Number(match[1]);
+    if (slot >= 0 && slot <= 9) categories.push({ slot, count: Number(match[2]), name: textFromHtml(match[4]) || decodeHtml(match[3]) });
+  }
+
+  const items: FavoriteItem[] = [];
+  const seen = new Set<string>();
+  const galleryPattern = /<a\b[^>]*href=["']([^"']*\/g\/(\d+)\/([a-z0-9]+)\/?[^"']*)["'][^>]*>([\s\S]{0,5000}?)<\/a>/gi;
+  for (const match of html.matchAll(galleryPattern)) {
+    const url = absoluteUrl(match[1], baseUrl);
+    const id = match[2];
+    const token = match[3];
+    if (seen.has(id)) continue;
+    const glink = /<div\b[^>]*class=["'][^"']*\bglink\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i.exec(match[4])?.[1];
+    const title = textFromHtml(glink ?? match[4]);
+    if (!title) continue;
+    seen.add(id);
+    items.push({ id, token, url, title });
+  }
+
+  const next = /<a\b[^>]*\bid=["'](?:dnext|unext)["'][^>]*\bhref=["']([^"']+)["']/i.exec(html)?.[1];
+  return { categories, items, nextPage: next ? absoluteUrl(next, baseUrl) : undefined };
+}
+
+export async function listFavorites(options: FavoritesOptions = {}): Promise<FavoritesResult> {
+  const category = options.category;
+  const pages = options.pages ?? 1;
+  if (category !== undefined && (!Number.isInteger(category) || category < 0 || category > 9)) {
+    throw new Error("Favorite category must be an integer from 0 to 9.");
+  }
+  if (!Number.isInteger(pages) || pages < 1 || pages > 100) throw new Error("Favorites pages must be an integer from 1 to 100.");
+  const site = options.site ?? "e-hentai";
+  if (site !== "e-hentai" && site !== "exhentai") throw new Error("Favorites site must be e-hentai or exhentai.");
+
+  const url = new URL("/favorites.php", site === "e-hentai" ? "https://e-hentai.org" : "https://exhentai.org");
+  if (category !== undefined) url.searchParams.set("favcat", String(category));
+  if (options.search) {
+    url.searchParams.set("f_search", options.search);
+    url.searchParams.set("sn", "on");
+    url.searchParams.set("st", "on");
+    url.searchParams.set("sf", "on");
+  }
+
+  let currentUrl = url.toString();
+  let categories: FavoriteCategory[] = [];
+  const items: FavoriteItem[] = [];
+  const seen = new Set<string>();
+  let pagesFetched = 0;
+  let nextPage: string | undefined;
+  while (currentUrl && pagesFetched < pages) {
+    const page = await getText(currentUrl, options, currentUrl);
+    if (/This page requires you to log on\.|You are not logged in/i.test(page.html)) {
+      throw new Error("The favorites page requires an authorized Cookie.");
+    }
+    const parsed = parseFavoritesPage(page.html, page.url);
+    if (!categories.length) categories = parsed.categories;
+    for (const item of parsed.items) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        items.push(item);
+      }
+    }
+    pagesFetched += 1;
+    nextPage = parsed.nextPage;
+    if (nextPage && !isGalleryHost(new URL(nextPage))) throw new Error("Favorites pagination returned an untrusted host.");
+    currentUrl = nextPage ?? "";
+  }
+  return { categories, items, pagesFetched, nextPage };
 }
 
 export function parseArchivePageUrl(html: string, baseUrl: string): string | undefined {

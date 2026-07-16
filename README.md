@@ -93,6 +93,27 @@ eharchive batch .\galleries.txt --quality original --out .\downloads --concurren
 eharchive retry .\batch-report.json --out .\downloads --report .\retry-report.json
 ```
 
+## 查看和导出云端收藏
+
+使用已保存的 Cookie 查看当前账号的云端收藏。默认读取一页：
+
+```powershell
+eharchive favorites list
+eharchive favorites list --category 0 --pages 3
+eharchive favorites list --search "关键词" --json
+```
+
+`--category` 可选 `0` 到 `9`；`--all` 会连续读取全部页面（最多 100 页）。需要 ExH 页面时可传 `--site exhentai`。
+
+导出为与 `batch` 兼容的 `ID/Token` 清单后直接下载：
+
+```powershell
+eharchive favorites list --category 0 --all --export .\favorites-0.txt
+eharchive batch .\favorites-0.txt --out .\downloads --concurrency 2
+```
+
+收藏列表和导出文件不包含 Cookie；该功能只读取收藏，不会修改线上收藏夹。
+
 ## 开发与发布
 
 ```powershell

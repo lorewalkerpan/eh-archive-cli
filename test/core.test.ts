@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { downloadArchive, normalizeGalleryUrl, parseArchiveOffer, parseArchivePageUrl, parseContinuationUrl, parseDirectUrl } from "../src/core.js";
+import { downloadArchive, normalizeGalleryUrl, parseArchiveOffer, parseArchivePageUrl, parseContinuationUrl, parseDirectUrl, parseFavoritesPage } from "../src/core.js";
 
 test("accepts a compact gallery ID and Token", () => {
   assert.equal(normalizeGalleryUrl("2724315/34536084b4"), "https://e-hentai.org/g/2724315/34536084b4/");
@@ -27,6 +27,24 @@ test("parses original and resampled form actions", () => {
 test("parses continuation and direct ZIP URLs", () => {
   assert.equal(parseContinuationUrl(`<script>document.location = "/continue/1"</script>`, "https://example.test/archiver.php"), "https://example.test/continue/1");
   assert.equal(parseDirectUrl(`<a href="/archive.zip">Click Here To Start Downloading</a>`, "https://example.test/continue/1"), "https://example.test/archive.zip");
+});
+
+test("parses favorite categories, gallery references, and pagination", () => {
+  const html = `
+    <div class="fp" onclick="document.location='https://e-hentai.org/favorites.php?favcat=0'">
+      <div>12</div><div class="i" title="Favorites 0"></div><div>Reading list</div>
+    </div>
+    <a href="/g/123/exampletoken/"><div class="gl4e glname"><div class="glink">Example &amp; Gallery</div></div></a>
+    <a id="dnext" href="/favorites.php?favcat=0&amp;next=123-456">Next</a>`;
+  const result = parseFavoritesPage(html, "https://e-hentai.org/favorites.php?favcat=0");
+  assert.deepEqual(result.categories, [{ slot: 0, count: 12, name: "Reading list" }]);
+  assert.deepEqual(result.items, [{
+    id: "123",
+    token: "exampletoken",
+    url: "https://e-hentai.org/g/123/exampletoken/",
+    title: "Example & Gallery"
+  }]);
+  assert.equal(result.nextPage, "https://e-hentai.org/favorites.php?favcat=0&next=123-456");
 });
 
 test("retries and resumes a ZIP download without forwarding the Cookie", async () => {

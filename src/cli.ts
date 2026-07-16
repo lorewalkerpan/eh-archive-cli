@@ -5,6 +5,7 @@ import { Command } from "commander";
 import { AdaptiveLimiter, type AdaptiveEvent, type AdaptiveSnapshot } from "./adaptive.js";
 import { clearCookie, defaultConfigPath, loadConfig, normalizeCookieInput, saveCookie } from "./config.js";
 import { downloadArchive, getGalleryPreview, listFavorites, normalizeGalleryUrl, resolveArchive, searchGalleries, type ArchiveKind, type GalleryPreview } from "./core.js";
+import { useEnvironmentProxy } from "./proxy.js";
 
 type CookieCommandOptions = {
   cookieEnv: string;
@@ -59,9 +60,19 @@ const program = new Command();
 program
   .name("eharchive")
   .description("下载你有权访问的图库归档 ZIP")
-  .version("0.9.0")
+  .version("0.9.1")
   .option("--config <path>", "本机 Cookie 配置文件路径", defaultConfigPath())
+  .option("--no-proxy", "不使用系统或环境代理，改为直接连接")
   .showHelpAfterError();
+
+let networkConfigured = false;
+const networkCommands = new Set(["download", "batch", "retry", "list", "search", "preview"]);
+program.hook("preAction", (_thisCommand, actionCommand) => {
+  if (!networkCommands.has(actionCommand.name())) return;
+  if (networkConfigured) return;
+  networkConfigured = true;
+  if (program.opts().proxy !== false) useEnvironmentProxy();
+});
 
 function qualityOption(command: Command): Command {
   return command

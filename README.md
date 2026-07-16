@@ -43,6 +43,14 @@ Get-Clipboard | eharchive config set-cookie --stdin
 
 配置文件含有登录 Cookie，请勿上传、共享或提交到 Git；Unix 系统会限制为仅当前用户可读写。使用 `eharchive config clear` 可删除该配置。管道、CI 等非交互环境不会等待输入；请先用 `config set-cookie --stdin` 保存，或临时传入 `--cookie-file`。
 
+## 系统代理
+
+默认自动使用系统环境中的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 和 `NO_PROXY`，无需额外设置 Node 参数。需要临时直连时，将根选项放在命令前：
+
+```powershell
+eharchive --no-proxy favorites list
+```
+
 无需保存 Cookie 时，可在每次执行中使用环境变量或文件：
 
 ```powershell

@@ -81,6 +81,11 @@ export interface GalleryPreview {
   thumbnails: GalleryThumbnail[];
 }
 
+export interface ResolvedArchive {
+  directUrl: string;
+  title: string;
+}
+
 const defaultUserAgent = "eh-archive-cli (+https://github.com/lorewalkerpan/eh-archive-cli)";
 const galleryHosts = new Set(["e-hentai.org", "exhentai.org"]);
 
@@ -180,10 +185,14 @@ export function parseGalleryPreviewItems(html: string, baseUrl: string): Gallery
 }
 
 /** Parses the cover and the gallery page's default first-page thumbnail grid. */
+export function parseGalleryTitle(html: string): string {
+  const titleHtml = /<h1\b[^>]*\bid=["']gn["'][^>]*>([\s\S]*?)<\/h1>/i.exec(html)?.[1];
+  return textFromHtml(titleHtml ?? "") || "Untitled gallery";
+}
+
 export function parseGalleryPreview(html: string, baseUrl: string, limit = 20): Omit<GalleryPreview, "galleryUrl"> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error("Preview image count must be an integer from 1 to 20.");
-  const titleHtml = /<h1\b[^>]*\bid=["']gn["'][^>]*>([\s\S]*?)<\/h1>/i.exec(html)?.[1];
-  const title = textFromHtml(titleHtml ?? "") || "Untitled gallery";
+  const title = parseGalleryTitle(html);
   const coverBlock = /<div\b[^>]*\bid=["']gd1["'][^>]*>[\s\S]{0,3000}?<\/div>/i.exec(html)?.[0] ?? "";
   const coverUrl = cssBackgroundUrl(coverBlock, baseUrl);
   const thumbnails: GalleryThumbnail[] = [];
@@ -350,9 +359,10 @@ export function parseDirectUrl(html: string, baseUrl: string): string | undefine
   return undefined;
 }
 
-export async function resolveArchive(galleryUrl: string, kind: ArchiveKind, options: ResolveOptions = {}): Promise<string> {
+export async function resolveArchiveDetails(galleryUrl: string, kind: ArchiveKind, options: ResolveOptions = {}): Promise<ResolvedArchive> {
   const normalizedGalleryUrl = normalizeGalleryUrl(galleryUrl);
   const gallery = await getText(normalizedGalleryUrl, options, normalizedGalleryUrl);
+  const title = parseGalleryTitle(gallery.html);
   const archivePage = parseArchivePageUrl(gallery.html, gallery.url);
   if (!archivePage) throw new Error("No Archive Download entry was found on the gallery page.");
 
@@ -381,7 +391,11 @@ export async function resolveArchive(galleryUrl: string, kind: ArchiveKind, opti
   const completed = await getText(continuation, options, offerUrl);
   const directUrl = parseDirectUrl(completed.html, completed.url);
   if (!directUrl) throw new Error("The archive service did not return a direct ZIP URL.");
-  return directUrl;
+  return { directUrl, title };
+}
+
+export async function resolveArchive(galleryUrl: string, kind: ArchiveKind, options: ResolveOptions = {}): Promise<string> {
+  return (await resolveArchiveDetails(galleryUrl, kind, options)).directUrl;
 }
 
 export type DownloadResult = "downloaded" | "skipped";

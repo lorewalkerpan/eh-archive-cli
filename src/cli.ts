@@ -5,7 +5,7 @@ import { Command } from "commander";
 import { AdaptiveLimiter, type AdaptiveEvent, type AdaptiveSnapshot } from "./adaptive.js";
 import { archiveAttempts, canFallBackToResampled, defaultArchiveFilename, parseArchiveQuality, type ArchiveQuality } from "./archive-quality.js";
 import { clearCookie, defaultConfigPath, loadConfig, normalizeCookieInput, saveCookie, saveLogLevel, saveProxy } from "./config.js";
-import { downloadArchive, getGalleryPreview, listFavorites, normalizeGalleryUrl, resolveArchive, searchGalleries, type GalleryPreview } from "./core.js";
+import { downloadArchive, getGalleryPreview, listFavorites, normalizeGalleryUrl, resolveArchiveDetails, searchGalleries, type GalleryPreview } from "./core.js";
 import { useProxySetting } from "./proxy.js";
 import { configureLogging, defaultLogPath, logError, logInfo } from "./log.js";
 
@@ -62,7 +62,7 @@ const program = new Command();
 program
   .name("eharchive")
   .description("下载你有权访问的图库归档 ZIP")
-  .version("0.9.4")
+  .version("0.9.5")
   .option("--config <path>", "本机 Cookie 配置文件路径", defaultConfigPath())
   .option("--no-proxy", "不使用系统或环境代理，改为直接连接")
   .showHelpAfterError();
@@ -233,15 +233,9 @@ async function downloadOne(galleryReference: string, options: DownloadCommandOpt
   const cookie = await getCookie(options);
   process.stderr.write(`${progressPrefix}解析归档链接…\n`);
   for (const kind of archiveAttempts(quality)) {
-    const outputPath = resolve(options.out, options.name ?? defaultArchiveFilename(galleryUrl, kind));
-    if (await fileExists(outputPath) && !options.overwrite) {
-      process.stderr.write(`${progressPrefix}跳过已存在文件：${basename(outputPath)}（使用 --overwrite 可覆盖）\n`);
-      return { status: "skipped", outputPath, galleryUrl };
-    }
-
-    let directUrl: string;
+    let archive: Awaited<ReturnType<typeof resolveArchiveDetails>>;
     try {
-      directUrl = await resolveArchive(galleryUrl, kind, { cookie });
+      archive = await resolveArchiveDetails(galleryUrl, kind, { cookie });
     } catch (error) {
       if (quality === "auto" && kind === "original" && canFallBackToResampled(error)) {
         process.stderr.write(`${progressPrefix}原图归档不可用，改为下载压缩版本。\n`);
@@ -250,8 +244,14 @@ async function downloadOne(galleryReference: string, options: DownloadCommandOpt
       throw error;
     }
 
+    const outputPath = resolve(options.out, options.name ?? defaultArchiveFilename(galleryUrl, kind, archive.title));
+    if (await fileExists(outputPath) && !options.overwrite) {
+      process.stderr.write(`${progressPrefix}跳过已存在文件：${basename(outputPath)}（使用 --overwrite 可覆盖）\n`);
+      return { status: "skipped", outputPath, galleryUrl };
+    }
+
     let lastReport = 0;
-    const result = await downloadArchive(directUrl, outputPath, {
+    const result = await downloadArchive(archive.directUrl, outputPath, {
       cookie,
       overwrite: options.overwrite,
       resume: options.resume,

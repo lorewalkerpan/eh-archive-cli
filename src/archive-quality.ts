@@ -11,9 +11,18 @@ export function archiveAttempts(quality: ArchiveQuality): ArchiveKind[] {
   return quality === "auto" ? ["original", "resampled"] : [quality];
 }
 
-export function defaultArchiveFilename(galleryUrl: string, kind: ArchiveKind): string {
+export function sanitizeArchiveTitle(title: string): string {
+  const cleaned = title
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "");
+  return (cleaned || "Untitled gallery").slice(0, 180);
+}
+
+export function defaultArchiveFilename(galleryUrl: string, kind: ArchiveKind, title: string): string {
   const parts = new URL(galleryUrl).pathname.split("/").filter(Boolean);
-  return `${parts[1] ?? "archive"} [${kind}].zip`;
+  return `${sanitizeArchiveTitle(title)} [${parts[1] ?? "archive"}] [${kind}].zip`;
 }
 
 export function canFallBackToResampled(error: unknown): boolean {

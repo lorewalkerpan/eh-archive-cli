@@ -17,7 +17,15 @@ eharchive --help
 
 ## Cookie 设置
 
-Cookie 不会出现在命令历史或命令输出中。推荐先把 Cookie 放到环境变量，再保存到本机配置：
+首次运行需要登录 Cookie 的命令（如 `download`、`favorites list`）时，工具会自动检查本机配置。若未配置且当前终端可交互，会提示你直接粘贴 Cookie：输入不会回显、不会写入命令历史，并会自动保存供后续命令使用。
+
+默认保存位置固定为 Windows 的 `%APPDATA%\eharchive\config.json`，独立于 npm 的全局安装目录；正常升级或重新安装 CLI 都不会删除它。可随时用下面的命令确认保存位置和状态：
+
+```powershell
+eharchive config show
+```
+
+也可主动运行 `eharchive config set-cookie`，按提示隐藏录入。若更适合从环境变量、文件或剪贴板导入，推荐：
 
 ```powershell
 $env:EH_COOKIE = "ipb_member_id=...; ipb_pass_hash=..."
@@ -31,7 +39,7 @@ eharchive config show
 Get-Clipboard | eharchive config set-cookie --stdin
 ```
 
-默认配置文件位于 Windows 的 `%APPDATA%\eharchive\config.json`。它含有登录 Cookie，请勿上传、共享或提交到 Git；Unix 系统会限制为仅当前用户可读写。使用 `eharchive config clear` 可删除该配置。
+配置文件含有登录 Cookie，请勿上传、共享或提交到 Git；Unix 系统会限制为仅当前用户可读写。使用 `eharchive config clear` 可删除该配置。管道、CI 等非交互环境不会等待输入；请先用 `config set-cookie --stdin` 保存，或临时传入 `--cookie-file`。
 
 无需保存 Cookie 时，可在每次执行中使用环境变量或文件：
 

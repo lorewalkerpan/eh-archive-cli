@@ -17,7 +17,15 @@ eharchive --help
 
 ## Configure a Cookie
 
-Keep the Cookie out of shell history by using an environment variable:
+On the first command that requires a Cookie (such as `download` or `favorites list`), the CLI checks the local configuration. If none exists in an interactive terminal, it asks you to paste one: input is hidden, never added to shell history, and then saved for later commands.
+
+The default location is always `%APPDATA%\eharchive\config.json` on Windows. It is outside npm's global installation directory, so normal upgrades and reinstalls do not remove it. Check its location and state at any time:
+
+```powershell
+eharchive config show
+```
+
+You can also run `eharchive config set-cookie` and follow the hidden prompt. To import from an environment variable, file, or clipboard instead:
 
 ```powershell
 $env:EH_COOKIE = "ipb_member_id=...; ipb_pass_hash=..."
@@ -30,7 +38,7 @@ On Windows, you can pipe a clipboard value instead:
 Get-Clipboard | eharchive config set-cookie --stdin
 ```
 
-The saved local configuration contains the Cookie. Do not commit or share it; remove it with `eharchive config clear`. You can also use `--cookie-env` or `--cookie-file` for a temporary Cookie.
+The saved local configuration contains the Cookie. Do not commit or share it; remove it with `eharchive config clear`. Non-interactive environments such as pipes and CI never wait for secret input: save it first with `config set-cookie --stdin`, or use `--cookie-file` temporarily.
 
 ## Download
 

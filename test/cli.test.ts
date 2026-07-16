@@ -39,3 +39,15 @@ test("writes a report and retries only failed batch entries", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("explains how to configure a missing Cookie in a non-interactive terminal", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "eharchive-cli-cookie-"));
+  try {
+    const result = await runCli(["--config", join(directory, "config.json"), "favorites", "list"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /未检测到已保存的 Cookie/);
+    assert.match(result.stderr, /--stdin/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

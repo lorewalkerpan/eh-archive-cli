@@ -116,8 +116,8 @@ eharchive download "2724315/34536084b4" --out .\downloads
 
 常用选项：
 
-- `--quality original|resampled`：原图或压缩版本。
-- `--out <目录>`、`--name <文件名>`：输出位置和 ZIP 名称。
+- `--quality original|resampled|auto`：原图、压缩版本，或优先原图、原图归档选项不存在时自动改用压缩版本。
+- `--out <目录>`、`--name <文件名>`：输出位置和 ZIP 名称。未指定名称时，自动使用 `图库ID [original].zip` 或 `图库ID [resampled].zip`，两个版本可并存。
 - `--overwrite`：完整 ZIP 已存在时重新下载，并在成功后安全替换。
 - `--retries <次数>`：请求失败后的重试次数，默认 `3`。
 - `--timeout <秒>`：每次 ZIP 请求的超时，默认 `60` 秒。

@@ -54,7 +54,7 @@ const program = new Command();
 program
   .name("eharchive")
   .description("下载你有权访问的图库归档 ZIP")
-  .version("0.6.0")
+  .version("0.7.0")
   .option("--config <path>", "本机 Cookie 配置文件路径", defaultConfigPath())
   .showHelpAfterError();
 
@@ -95,10 +95,60 @@ async function findCookie(options: CookieCommandOptions): Promise<string | undef
   return undefined;
 }
 
+async function readHiddenInput(prompt: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stderr.isTTY) {
+    throw new Error("未检测到已保存的 Cookie，且当前不是可交互终端。请先运行 `eharchive config set-cookie --stdin`，或使用 --cookie-file。");
+  }
+  process.stderr.write(prompt);
+  const input = process.stdin;
+  const previousRawMode = input.isRaw;
+  input.setRawMode(true);
+  input.resume();
+  input.setEncoding("utf8");
+  return new Promise((resolvePromise, reject) => {
+    let value = "";
+    const finish = () => {
+      input.off("data", onData);
+      input.setRawMode(previousRawMode);
+      process.stderr.write("\n");
+    };
+    const onData = (chunk: string) => {
+      for (const character of chunk) {
+        if (character === "\r" || character === "\n") {
+          finish();
+          resolvePromise(value.trim());
+          return;
+        }
+        if (character === "\u0003" || character === "\u0004") {
+          finish();
+          reject(new Error("已取消 Cookie 配置。"));
+          return;
+        }
+        if (character === "\b" || character === "\u007f") {
+          value = value.slice(0, -1);
+          continue;
+        }
+        if (character !== "\u0000") value += character;
+      }
+    };
+    input.on("data", onData);
+  });
+}
+
+async function promptAndSaveCookie(): Promise<string> {
+  const configPath = program.opts().config;
+  process.stderr.write(`未检测到已保存的 Cookie。配置将保存到 ${configPath}；此位置独立于 npm 安装目录，升级不会删除它。\n`);
+  const cookie = await readHiddenInput("请粘贴 Cookie 后按 Enter（输入不会回显，也不会写入命令历史）：");
+  if (!cookie) throw new Error("Cookie 不能为空。可重新运行命令，或使用 `eharchive config set-cookie --stdin`。" );
+  await saveCookie(configPath, cookie);
+  process.stderr.write("Cookie 已安全保存；后续命令会自动使用该配置。\n");
+  return cookie;
+}
+
 async function getCookie(options: CookieCommandOptions): Promise<string> {
   const cookie = await findCookie(options);
   if (cookie) return cookie;
-  throw new Error("没有可用 Cookie。运行 `eharchive config set-cookie --cookie-env EH_COOKIE`，或使用 --cookie-file。");
+  return promptAndSaveCookie();
 }
 
 async function readStandardInput(): Promise<string> {
@@ -397,7 +447,7 @@ config.command("set-cookie")
       ? await readStandardInput()
       : options.cookieFile
         ? (await readFile(options.cookieFile, "utf8")).trim()
-        : process.env[options.cookieEnv]?.trim();
+        : process.env[options.cookieEnv]?.trim() ?? await readHiddenInput("请粘贴 Cookie 后按 Enter（输入不会回显，也不会写入命令历史）：");
     if (!cookie) throw new Error(`未找到 Cookie。请先设置 ${options.cookieEnv}，或使用 --cookie-file / --stdin。`);
     await saveCookie(program.opts().config, cookie);
     process.stdout.write(`Cookie 已保存到 ${program.opts().config}\n`);

@@ -15,6 +15,26 @@ npm install -g @lorewalkerpan/eh-archive-cli
 eharchive --help
 ```
 
+### Upgrade
+
+```powershell
+npm update -g @lorewalkerpan/eh-archive-cli
+eharchive --version
+```
+
+Upgrading does not remove the Cookie or proxy policy stored in `%APPDATA%\eharchive\config.json`.
+
+## Quick start
+
+Check the local configuration and download one gallery you are authorized to access. The first command that needs authentication starts the Cookie wizard automatically.
+
+```powershell
+eharchive config show
+eharchive download "gallery-id/token" --out .\downloads
+```
+
+`ID/Token` is the pair from a gallery URL, such as `123/token` from `https://e-hentai.org/g/123/token/`. A numeric ID alone is not enough.
+
 ## Configure a Cookie
 
 On the first command that requires a Cookie (such as `download` or `favorites list`), the CLI checks the local configuration. If none exists in an interactive terminal, it asks separately for `ipb_member_id`, `ipb_pass_hash`, and optionally `igneous`: every value is hidden, never added to shell history, and then saved for later commands.
@@ -139,6 +159,73 @@ eharchive batch .\favorites-0.txt --out .\downloads --concurrency 2
 ```
 
 Favorites output and exported lists never contain the Cookie. This command is read-only and does not alter cloud favorites.
+
+## Configuration and command reference
+
+| Goal | Command |
+| --- | --- |
+| Show local configuration | `eharchive config show` |
+| Set Cookie again | `eharchive config set-cookie` |
+| Clear Cookie but keep proxy | `eharchive config clear` |
+| Use system proxy | `eharchive config set-proxy system` |
+| Persist direct connections | `eharchive config set-proxy direct` |
+| Bypass proxy once | `eharchive --no-proxy <command>` |
+| Export favorites for download | `eharchive favorites list --all --export .\favorites.txt` |
+| Search, then download | `eharchive search "keyword" --export .\results.txt`, then `eharchive batch .\results.txt` |
+
+The local file only stores `cookie` and `proxy`. The former is sensitive; the latter can be `system`, `direct`, or an HTTP(S) proxy URL. Do not copy or share this file.
+
+## Troubleshooting
+
+### `fetch failed` / `UND_ERR_CONNECT_TIMEOUT`
+
+Run `eharchive config show` to check the proxy policy. For a local proxy, use `system` or save an explicit address with `eharchive config set-proxy http://127.0.0.1:7890`. If the network should connect directly, test with `eharchive --no-proxy favorites list`.
+
+### Login redirects, favorites failures, or insufficient permission
+
+Run `eharchive config set-cookie` again and provide `ipb_member_id` plus `ipb_pass_hash`. The CLI does not bypass login, quotas, access controls, or content restrictions; confirm that the account itself has access.
+
+### Some batch items fail
+
+Keep the JSON report and retry failures only:
+
+```powershell
+eharchive retry .\batch-report.json --out .\downloads --report .\retry-report.json
+```
+
+Lower `--concurrency` or increase `--delay` when needed. Adaptive mode is on by default and slows down after rate limits or timeouts.
+
+## Safety and scope
+
+- Cookies are sent only to trusted EH gallery hosts and never forwarded to direct ZIP hosts.
+- ZIP downloads use `.part` files and replace the final output only after success.
+- Search, favorites, and preview are read-only by default; batch downloads require an explicit `batch` command.
+- Download and retain only content you are authorized to access.
+
+## Practical workflow notes
+
+Choose the command by the result you want:
+
+| Need | Command | Network effect |
+| --- | --- | --- |
+| Download one archive | `eharchive download ID/Token` | Reads the gallery and requests its authorized archive |
+| Search without downloading | `eharchive search "query"` | Read-only search request |
+| Inspect one gallery | `eharchive preview ID/Token` | Reads gallery metadata and references remote thumbnails in HTML |
+| Download a prepared list | `eharchive batch galleries.txt` | Explicitly downloads every listed item |
+| Retry only failures | `eharchive retry report.json` | Re-runs failed entries from a previous batch |
+| Read cloud favorites | `eharchive favorites list` | Read-only account request |
+
+Search, favorites, and preview never turn into downloads implicitly. A search export is a plain UTF-8 file containing one `ID/Token` per line, so it can be reviewed or edited before running `batch`.
+
+Downloads are written below the selected `--out` directory. Existing archives are skipped unless `--overwrite` is supplied; interrupted transfers remain as `.part` files and resume by default. A failed batch sets a non-zero exit code but still writes the report, allowing `retry` to continue later.
+
+The preview HTML is a lightweight index: its cover and up to 20 thumbnails remain remote references. It is not an offline copy of the gallery and does not download original images.
+
+## Supported references and sites
+
+The accepted gallery reference is either a full URL such as `https://e-hentai.org/g/123/token/` or its compact `123/token` form. Numeric IDs without a token are rejected because the token is required to resolve the gallery. Gallery URLs are restricted to `e-hentai.org` and `exhentai.org`; cookies are never forwarded to archive ZIP hosts.
+
+The `favorites` and `search` commands support `--site e-hentai` and `--site exhentai`. Use `exhentai` only when the account and network have access to it.
 
 ## Development and publishing
 

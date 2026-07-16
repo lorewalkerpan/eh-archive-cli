@@ -15,6 +15,26 @@ npm install -g @lorewalkerpan/eh-archive-cli
 eharchive --help
 ```
 
+### 升级
+
+```powershell
+npm update -g @lorewalkerpan/eh-archive-cli
+eharchive --version
+```
+
+升级不会删除 `%APPDATA%\eharchive\config.json` 中保存的 Cookie 或代理策略。
+
+## 快速开始
+
+最常见的流程是：先确认配置状态，再下载一个已授权图库。首次需要登录的命令会自动进入 Cookie 向导。
+
+```powershell
+eharchive config show
+eharchive download "图库ID/Token" --out .\downloads
+```
+
+`ID/Token` 是站点图库地址中的两段标识，例如 URL `https://e-hentai.org/g/123/token/` 对应 `123/token`。仅有数字 ID 无法请求图库。
+
 ## Cookie 设置
 
 首次运行需要登录 Cookie 的命令（如 `download`、`favorites list`）时，工具会自动检查本机配置。若未配置且当前终端可交互，会依次提示输入 `ipb_member_id`、`ipb_pass_hash`，再可选输入 `igneous`：每项输入都不会回显、不会写入命令历史，并会自动保存供后续命令使用。
@@ -167,6 +187,73 @@ eharchive batch .\favorites-0.txt --out .\downloads --concurrency 2
 ```
 
 收藏列表和导出文件不包含 Cookie；该功能只读取收藏，不会修改线上收藏夹。
+
+## 配置与命令速查
+
+| 需求 | 命令 |
+| --- | --- |
+| 查看本机配置状态 | `eharchive config show` |
+| 重新设置 Cookie | `eharchive config set-cookie` |
+| 清除 Cookie、保留代理 | `eharchive config clear` |
+| 使用系统代理 | `eharchive config set-proxy system` |
+| 持久化直连 | `eharchive config set-proxy direct` |
+| 单次直连 | `eharchive --no-proxy <命令>` |
+| 查看收藏并导出下载列表 | `eharchive favorites list --all --export .\favorites.txt` |
+| 搜索后再下载 | `eharchive search "关键词" --export .\results.txt` 后执行 `eharchive batch .\results.txt` |
+
+配置文件字段只有 `cookie` 与 `proxy`；前者是敏感信息，后者可为 `system`、`direct` 或 HTTP(S) 代理地址。不要手工复制或分享配置文件。
+
+## 常见问题
+
+### `fetch failed` / `UND_ERR_CONNECT_TIMEOUT`
+
+先运行 `eharchive config show` 确认代理策略。使用本地代理时选择 `system`，或保存明确地址：`eharchive config set-proxy http://127.0.0.1:7890`。若网络本应直连，可临时用 `eharchive --no-proxy favorites list` 排查。
+
+### 登录重定向、收藏读取失败或权限不足
+
+重新运行 `eharchive config set-cookie`，按向导填写 `ipb_member_id` 与 `ipb_pass_hash`。工具不会绕过登录、配额、访问控制或站点内容限制；请确认账号本身拥有相应权限。
+
+### 批量下载有部分失败
+
+保留 `--report` 生成的 JSON 报告，再只重试失败项：
+
+```powershell
+eharchive retry .\batch-report.json --out .\downloads --report .\retry-report.json
+```
+
+可降低 `--concurrency` 或提高 `--delay`，默认自适应模式会在限流或超时时自动降速。
+
+## 安全与边界
+
+- Cookie 仅发送给受信任的 EH 图库域名，不会随 ZIP 直链转发。
+- ZIP 下载使用 `.part` 文件，成功后才安全替换正式文件。
+- 搜索、收藏、预览默认是只读操作；批量下载必须显式执行 `batch`。
+- 请只下载和保存你有权访问与保留的内容。
+
+## 实际使用要点
+
+按目标选择命令：
+
+| 目标 | 命令 | 网络行为 |
+| --- | --- | --- |
+| 下载一本归档 | `eharchive download ID/Token` | 读取图库并请求账号有权使用的归档 |
+| 只搜索不下载 | `eharchive search "关键词"` | 只读取搜索结果 |
+| 查看单本图库 | `eharchive preview ID/Token` | 读取元数据，并在 HTML 中引用远程缩略图 |
+| 下载准备好的清单 | `eharchive batch galleries.txt` | 明确下载清单中的每一项 |
+| 只重试失败项 | `eharchive retry report.json` | 根据上次批量报告重跑失败项 |
+| 读取云端收藏 | `eharchive favorites list` | 只读账号请求 |
+
+搜索、收藏和预览不会隐式开始下载。搜索导出的是 UTF-8 文本，每行一个 `ID/Token`，可以先检查或编辑，再交给 `batch`。
+
+下载文件位于 `--out` 指定目录。已有归档默认跳过，使用 `--overwrite` 才会覆盖；中断的传输会保留 `.part` 文件并默认续传。批量任务即使有失败项也会写出报告，同时以非零退出码结束，之后可以用 `retry` 继续。
+
+预览 HTML 是轻量索引：封面和最多 20 张缩略图仍引用站点地址，不是离线图库，也不会下载原图。
+
+## 支持的引用格式和站点
+
+图库引用可以是完整 URL，例如 `https://e-hentai.org/g/123/token/`，也可以是简写 `123/token`。只有数字 ID 会被拒绝，因为解析图库还需要 Token。完整 URL 仅接受 `e-hentai.org` 和 `exhentai.org`；Cookie 不会转发到归档 ZIP 域名。
+
+`favorites` 和 `search` 支持 `--site e-hentai` 与 `--site exhentai`。只有账号和网络确实能够访问 ExH 时才使用 `exhentai`。
 
 ## 开发与发布
 

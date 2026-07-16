@@ -1,5 +1,5 @@
 import { createWriteStream } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rename, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -13,6 +13,7 @@ export interface ResolveOptions {
 
 export interface DownloadOptions extends ResolveOptions {
   onProgress?: (downloaded: number, total?: number) => void;
+  overwrite?: boolean;
 }
 
 const defaultUserAgent = "eh-archive-cli/0.1.0 (+https://github.com/lorewalkerpan/eh-archive-cli)";
@@ -110,8 +111,22 @@ export async function resolveArchive(galleryUrl: string, kind: ArchiveKind, opti
   return directUrl;
 }
 
-export async function downloadArchive(directUrl: string, outputPath: string, options: DownloadOptions = {}): Promise<void> {
+export type DownloadResult = "downloaded" | "skipped";
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function downloadArchive(directUrl: string, outputPath: string, options: DownloadOptions = {}): Promise<DownloadResult> {
   await mkdir(dirname(outputPath), { recursive: true });
+  if (await exists(outputPath)) {
+    if (!options.overwrite) return "skipped";
+  }
   const response = await fetch(directUrl, { headers: requestHeaders(options), redirect: "follow" });
   if (!response.ok || !response.body) throw new Error(`ZIP download failed (${response.status}).`);
   const totalHeader = response.headers.get("content-length");
@@ -122,5 +137,15 @@ export async function downloadArchive(directUrl: string, outputPath: string, opt
     downloaded += chunk.length;
     options.onProgress?.(downloaded, total);
   });
-  await pipeline(source, createWriteStream(outputPath));
+  const temporaryPath = `${outputPath}.part`;
+  await rm(temporaryPath, { force: true });
+  try {
+    await pipeline(source, createWriteStream(temporaryPath));
+    if (await exists(outputPath)) await rm(outputPath, { force: true });
+    await rename(temporaryPath, outputPath);
+    return "downloaded";
+  } catch (error) {
+    await rm(temporaryPath, { force: true });
+    throw error;
+  }
 }

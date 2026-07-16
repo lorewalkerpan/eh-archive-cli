@@ -3,8 +3,9 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { Command } from "commander";
 import { AdaptiveLimiter, type AdaptiveEvent, type AdaptiveSnapshot } from "./adaptive.js";
+import { archiveAttempts, canFallBackToResampled, defaultArchiveFilename, parseArchiveQuality, type ArchiveQuality } from "./archive-quality.js";
 import { clearCookie, defaultConfigPath, loadConfig, normalizeCookieInput, saveCookie, saveLogLevel, saveProxy } from "./config.js";
-import { downloadArchive, getGalleryPreview, listFavorites, normalizeGalleryUrl, resolveArchive, searchGalleries, type ArchiveKind, type GalleryPreview } from "./core.js";
+import { downloadArchive, getGalleryPreview, listFavorites, normalizeGalleryUrl, resolveArchive, searchGalleries, type GalleryPreview } from "./core.js";
 import { useProxySetting } from "./proxy.js";
 import { configureLogging, defaultLogPath, logError, logInfo } from "./log.js";
 
@@ -19,7 +20,7 @@ type CookieCandidate = {
 };
 
 type DownloadCommandOptions = CookieCommandOptions & {
-  quality: ArchiveKind;
+  quality: ArchiveQuality;
   out: string;
   name?: string;
   overwrite?: boolean;
@@ -61,7 +62,7 @@ const program = new Command();
 program
   .name("eharchive")
   .description("下载你有权访问的图库归档 ZIP")
-  .version("0.9.3")
+  .version("0.9.4")
   .option("--config <path>", "本机 Cookie 配置文件路径", defaultConfigPath())
   .option("--no-proxy", "不使用系统或环境代理，改为直接连接")
   .showHelpAfterError();
@@ -83,7 +84,7 @@ program.hook("postAction", (_thisCommand, actionCommand) => {
 
 function qualityOption(command: Command): Command {
   return command
-    .option("-q, --quality <quality>", "original 或 resampled", "original")
+    .option("-q, --quality <quality>", "original、resampled 或 auto（原图不可用时降级）", "original")
     .option("-o, --out <directory>", "下载目录", "downloads")
     .option("--cookie-env <variable>", "临时 Cookie 的环境变量名", "EH_COOKIE")
     .option("--cookie-file <path>", "临时 Cookie 的 UTF-8 文件")
@@ -217,11 +218,6 @@ async function readStandardInput(): Promise<string> {
   return value.trim();
 }
 
-function defaultFilename(galleryUrl: string): string {
-  const parts = new URL(galleryUrl).pathname.split("/").filter(Boolean);
-  return `${parts[1] ?? "archive"}.zip`;
-}
-
 async function fileExists(path: string): Promise<boolean> {
   try {
     await access(path);
@@ -232,32 +228,46 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 async function downloadOne(galleryReference: string, options: DownloadCommandOptions, progressPrefix = ""): Promise<{ status: "downloaded" | "skipped"; outputPath: string; galleryUrl: string }> {
-  if (options.quality !== "original" && options.quality !== "resampled") throw new Error("--quality 必须是 original 或 resampled");
+  const quality = parseArchiveQuality(options.quality);
   const galleryUrl = normalizeGalleryUrl(galleryReference);
-  const outputPath = resolve(options.out, options.name ?? defaultFilename(galleryUrl));
-  if (await fileExists(outputPath) && !options.overwrite) {
-    process.stderr.write(`${progressPrefix}跳过已存在文件：${basename(outputPath)}（使用 --overwrite 可覆盖）\n`);
-    return { status: "skipped", outputPath, galleryUrl };
-  }
   const cookie = await getCookie(options);
   process.stderr.write(`${progressPrefix}解析归档链接…\n`);
-  const directUrl = await resolveArchive(galleryUrl, options.quality, { cookie });
-  let lastReport = 0;
-  const result = await downloadArchive(directUrl, outputPath, {
-    cookie,
-    overwrite: options.overwrite,
-    resume: options.resume,
-    retries: nonNegativeInteger(options.retries, "--retries"),
-    timeoutMs: positiveSeconds(options.timeout, "--timeout") * 1000,
-    onProgress(downloaded, total) {
-      if (downloaded - lastReport < 1024 * 1024 && total !== downloaded) return;
-      lastReport = downloaded;
-      const suffix = total ? ` / ${(total / 1024 / 1024).toFixed(1)} MiB` : "";
-      process.stderr.write(`${progressPrefix}已下载 ${(downloaded / 1024 / 1024).toFixed(1)} MiB${suffix}\n`);
+  for (const kind of archiveAttempts(quality)) {
+    const outputPath = resolve(options.out, options.name ?? defaultArchiveFilename(galleryUrl, kind));
+    if (await fileExists(outputPath) && !options.overwrite) {
+      process.stderr.write(`${progressPrefix}跳过已存在文件：${basename(outputPath)}（使用 --overwrite 可覆盖）\n`);
+      return { status: "skipped", outputPath, galleryUrl };
     }
-  });
-  if (result === "downloaded") process.stdout.write(`${outputPath}\n`);
-  return { status: result, outputPath, galleryUrl };
+
+    let directUrl: string;
+    try {
+      directUrl = await resolveArchive(galleryUrl, kind, { cookie });
+    } catch (error) {
+      if (quality === "auto" && kind === "original" && canFallBackToResampled(error)) {
+        process.stderr.write(`${progressPrefix}原图归档不可用，改为下载压缩版本。\n`);
+        continue;
+      }
+      throw error;
+    }
+
+    let lastReport = 0;
+    const result = await downloadArchive(directUrl, outputPath, {
+      cookie,
+      overwrite: options.overwrite,
+      resume: options.resume,
+      retries: nonNegativeInteger(options.retries, "--retries"),
+      timeoutMs: positiveSeconds(options.timeout, "--timeout") * 1000,
+      onProgress(downloaded, total) {
+        if (downloaded - lastReport < 1024 * 1024 && total !== downloaded) return;
+        lastReport = downloaded;
+        const suffix = total ? ` / ${(total / 1024 / 1024).toFixed(1)} MiB` : "";
+        process.stderr.write(`${progressPrefix}已下载 ${(downloaded / 1024 / 1024).toFixed(1)} MiB${suffix}\n`);
+      }
+    });
+    if (result === "downloaded") process.stdout.write(`${outputPath}\n`);
+    return { status: result, outputPath, galleryUrl };
+  }
+  throw new Error("未能获取可下载的归档版本。");
 }
 
 async function writeReport(path: string, report: BatchReport): Promise<void> {

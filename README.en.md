@@ -104,7 +104,8 @@ An ID alone is not enough because the gallery Token is required. Full URLs must 
 
 Useful options:
 
-- `--quality original|resampled`
+- `--quality original|resampled|auto`: original, resampled, or try original first and use resampled only when the original archive offer is unavailable.
+- Default ZIP names include the selected archive kind, such as `2724315 [original].zip` and `2724315 [resampled].zip`, so both versions can coexist.
 - `--overwrite` safely replaces an existing ZIP only after a successful download.
 - `--retries <count>` defaults to `3`; `--timeout <seconds>` defaults to `60`.
 - Downloads retain `.part` files after an interruption and resume by default. Use `--no-resume` to restart.

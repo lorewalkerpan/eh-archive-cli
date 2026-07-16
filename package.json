@@ -1,0 +1,42 @@
+{
+  "name": "@lorewalkerpan/eh-archive-cli",
+  "version": "0.1.0",
+  "description": "Command-line archive downloader for content you are authorized to download.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "bin": {
+    "eharchive": "./dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/core.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lorewalkerpan/eh-archive-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lorewalkerpan/eh-archive-cli/issues"
+  },
+  "homepage": "https://github.com/lorewalkerpan/eh-archive-cli#readme",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/**/*.test.js",
+    "pack:check": "npm pack --dry-run"
+  },
+  "dependencies": {
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

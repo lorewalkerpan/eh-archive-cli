@@ -1,0 +1,126 @@
+import { createWriteStream } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+
+export type ArchiveKind = "original" | "resampled";
+
+export interface ResolveOptions {
+  cookie?: string;
+  userAgent?: string;
+}
+
+export interface DownloadOptions extends ResolveOptions {
+  onProgress?: (downloaded: number, total?: number) => void;
+}
+
+const defaultUserAgent = "eh-archive-cli/0.1.0 (+https://github.com/lorewalkerpan/eh-archive-cli)";
+
+function decodeHtml(value: string): string {
+  return value.replace(/&amp;/gi, "&").replace(/&#x27;/gi, "'").replace(/&quot;/gi, '"');
+}
+
+function absoluteUrl(value: string, base: string): string {
+  const url = new URL(decodeHtml(value), base);
+  if (url.protocol !== "https:") throw new Error("Only HTTPS archive URLs are supported");
+  return url.toString();
+}
+
+function requestHeaders(options: ResolveOptions, referer?: string): Headers {
+  const headers = new Headers({ "user-agent": options.userAgent ?? defaultUserAgent });
+  if (options.cookie) headers.set("cookie", options.cookie);
+  if (referer) headers.set("referer", referer);
+  return headers;
+}
+
+async function getText(url: string, options: ResolveOptions, referer?: string): Promise<{ html: string; url: string }> {
+  const response = await fetch(url, { headers: requestHeaders(options, referer), redirect: "follow" });
+  if (!response.ok) throw new Error(`Request failed (${response.status}) for ${new URL(url).pathname}`);
+  const finalUrl = response.url;
+  const path = new URL(finalUrl).pathname.toLowerCase();
+  if (path.endsWith("bounce_login.php") || path.endsWith("login.php")) {
+    throw new Error("The site redirected to login. Set an authorized Cookie via --cookie-env or --cookie-file.");
+  }
+  return { html: await response.text(), url: finalUrl };
+}
+
+export function parseArchivePageUrl(html: string, baseUrl: string): string | undefined {
+  const direct = /<a[^>]*onclick=["']return\s+popUp\(['"]([^'"]+)['"][^>]*>\s*Archive\s+Download\s*<\/a>/i.exec(html);
+  if (direct) return absoluteUrl(direct[1], baseUrl);
+  const fallback = /popUp\(['"]([^'"]*archiver\.php[^'"]*)['"]/i.exec(html);
+  return fallback ? absoluteUrl(fallback[1], baseUrl) : undefined;
+}
+
+export function parseArchiveOffer(html: string, baseUrl: string, kind: ArchiveKind): string | undefined {
+  const forms = html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi);
+  for (const form of forms) {
+    const [, attributes, contents] = form;
+    const dltype = /<input\b[^>]*\bname=["']dltype["'][^>]*\bvalue=["']([^'"]+)["']/i.exec(contents)?.[1];
+    if ((kind === "original" && dltype !== "org") || (kind === "resampled" && dltype !== "res")) continue;
+    const action = /\baction=["']([^'"]+)["']/i.exec(attributes)?.[1];
+    if (action) return absoluteUrl(action, baseUrl);
+  }
+  return undefined;
+}
+
+export function parseContinuationUrl(html: string, baseUrl: string): string | undefined {
+  const match = /document\.location\s*=\s*["']([^"']+)["']/i.exec(html);
+  return match ? absoluteUrl(match[1], baseUrl) : undefined;
+}
+
+export function parseDirectUrl(html: string, baseUrl: string): string | undefined {
+  const anchors = html.matchAll(/<a\b[^>]*\bhref=["']([^'"]+)["'][^>]*>([\s\S]*?)<\/a>/gi);
+  for (const anchor of anchors) {
+    if (/start\s+downloading/i.test(anchor[2].replace(/<[^>]+>/g, " "))) return absoluteUrl(anchor[1], baseUrl);
+  }
+  return undefined;
+}
+
+export async function resolveArchive(galleryUrl: string, kind: ArchiveKind, options: ResolveOptions = {}): Promise<string> {
+  const gallery = await getText(absoluteUrl(galleryUrl, galleryUrl), options, galleryUrl);
+  const archivePage = parseArchivePageUrl(gallery.html, gallery.url);
+  if (!archivePage) throw new Error("No Archive Download entry was found on the gallery page.");
+
+  const archive = await getText(archivePage, options, gallery.url);
+  const offerUrl = parseArchiveOffer(archive.html, archive.url, kind);
+  if (!offerUrl) throw new Error(`No ${kind} archive offer was found. Your account may lack permission or credits.`);
+
+  const origin = new URL(offerUrl).origin;
+  const post = await fetch(offerUrl, {
+    method: "POST",
+    headers: new Headers({
+      ...Object.fromEntries(requestHeaders(options, archivePage)),
+      origin,
+      "content-type": "application/x-www-form-urlencoded"
+    }),
+    body: new URLSearchParams({
+      dltype: kind === "original" ? "org" : "res",
+      dlcheck: kind === "original" ? "Download Original Archive" : "Download Resample Archive"
+    }),
+    redirect: "follow"
+  });
+  if (!post.ok) throw new Error(`Archive request failed (${post.status}).`);
+  const continuation = parseContinuationUrl(await post.text(), post.url);
+  if (!continuation) throw new Error("The archive service did not return a continuation URL.");
+
+  const completed = await getText(continuation, options, offerUrl);
+  const directUrl = parseDirectUrl(completed.html, completed.url);
+  if (!directUrl) throw new Error("The archive service did not return a direct ZIP URL.");
+  return directUrl;
+}
+
+export async function downloadArchive(directUrl: string, outputPath: string, options: DownloadOptions = {}): Promise<void> {
+  await mkdir(dirname(outputPath), { recursive: true });
+  const response = await fetch(directUrl, { headers: requestHeaders(options), redirect: "follow" });
+  if (!response.ok || !response.body) throw new Error(`ZIP download failed (${response.status}).`);
+  const totalHeader = response.headers.get("content-length");
+  const total = totalHeader && /^\d+$/.test(totalHeader) ? Number(totalHeader) : undefined;
+  let downloaded = 0;
+  const source = Readable.fromWeb(response.body as never);
+  source.on("data", (chunk: Buffer) => {
+    downloaded += chunk.length;
+    options.onProgress?.(downloaded, total);
+  });
+  await pipeline(source, createWriteStream(outputPath));
+}

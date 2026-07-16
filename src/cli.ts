@@ -3,12 +3,17 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { Command } from "commander";
 import { AdaptiveLimiter, type AdaptiveEvent, type AdaptiveSnapshot } from "./adaptive.js";
-import { clearCookie, defaultConfigPath, loadConfig, saveCookie } from "./config.js";
+import { clearCookie, defaultConfigPath, loadConfig, normalizeCookieInput, saveCookie } from "./config.js";
 import { downloadArchive, getGalleryPreview, listFavorites, normalizeGalleryUrl, resolveArchive, searchGalleries, type ArchiveKind, type GalleryPreview } from "./core.js";
 
 type CookieCommandOptions = {
   cookieEnv: string;
   cookieFile?: string;
+};
+
+type CookieCandidate = {
+  value: string;
+  source: "file" | "environment" | "config";
 };
 
 type DownloadCommandOptions = CookieCommandOptions & {
@@ -54,7 +59,7 @@ const program = new Command();
 program
   .name("eharchive")
   .description("下载你有权访问的图库归档 ZIP")
-  .version("0.7.0")
+  .version("0.8.0")
   .option("--config <path>", "本机 Cookie 配置文件路径", defaultConfigPath())
   .showHelpAfterError();
 
@@ -82,17 +87,31 @@ function positiveSeconds(value: string, option: string): number {
   return parsed;
 }
 
-async function findCookie(options: CookieCommandOptions): Promise<string | undefined> {
+async function findCookie(options: CookieCommandOptions): Promise<CookieCandidate | undefined> {
   if (options.cookieFile) {
     const cookie = (await readFile(options.cookieFile, "utf8")).trim();
-    if (cookie) return cookie;
+    if (cookie) return { value: cookie, source: "file" };
     throw new Error("Cookie 文件为空。");
   }
   const fromEnvironment = process.env[options.cookieEnv]?.trim();
-  if (fromEnvironment) return fromEnvironment;
+  if (fromEnvironment) return { value: fromEnvironment, source: "environment" };
   const configured = await loadConfig(program.opts().config);
-  if (configured.cookie) return configured.cookie;
+  if (configured.cookie) return { value: configured.cookie, source: "config" };
   return undefined;
+}
+
+function normalizeCandidate(candidate: CookieCandidate): string {
+  try {
+    return normalizeCookieInput(candidate.value);
+  } catch (error) {
+    if (candidate.source === "config") return "";
+    throw error;
+  }
+}
+
+async function findOptionalCookie(options: CookieCommandOptions): Promise<string | undefined> {
+  const candidate = await findCookie(options);
+  return candidate ? normalizeCandidate(candidate) || undefined : undefined;
 }
 
 async function readHiddenInput(prompt: string): Promise<string> {
@@ -107,17 +126,29 @@ async function readHiddenInput(prompt: string): Promise<string> {
   input.setEncoding("utf8");
   return new Promise((resolvePromise, reject) => {
     let value = "";
+    let submitTimer: NodeJS.Timeout | undefined;
     const finish = () => {
+      if (submitTimer) clearTimeout(submitTimer);
       input.off("data", onData);
       input.setRawMode(previousRawMode);
       process.stderr.write("\n");
     };
+    const scheduleSubmit = () => {
+      if (submitTimer) clearTimeout(submitTimer);
+      // Pasted multi-line data can arrive as one or several quick terminal chunks.
+      // Waiting briefly after Enter preserves the complete paste while normal typing stays simple.
+      submitTimer = setTimeout(() => {
+        finish();
+        resolvePromise(value.trim());
+      }, 150);
+    };
     const onData = (chunk: string) => {
+      if (submitTimer) clearTimeout(submitTimer);
       for (const character of chunk) {
         if (character === "\r" || character === "\n") {
-          finish();
-          resolvePromise(value.trim());
-          return;
+          value += "\n";
+          scheduleSubmit();
+          continue;
         }
         if (character === "\u0003" || character === "\u0004") {
           finish();
@@ -138,16 +169,21 @@ async function readHiddenInput(prompt: string): Promise<string> {
 async function promptAndSaveCookie(): Promise<string> {
   const configPath = program.opts().config;
   process.stderr.write(`未检测到已保存的 Cookie。配置将保存到 ${configPath}；此位置独立于 npm 安装目录，升级不会删除它。\n`);
-  const cookie = await readHiddenInput("请粘贴 Cookie 后按 Enter（输入不会回显，也不会写入命令历史）：");
+  const cookie = await readHiddenInput("请粘贴完整 Cookie（支持多行和 key: value 格式）后按 Enter（输入不会回显，也不会写入命令历史）：");
   if (!cookie) throw new Error("Cookie 不能为空。可重新运行命令，或使用 `eharchive config set-cookie --stdin`。" );
-  await saveCookie(configPath, cookie);
+  const normalizedCookie = normalizeCookieInput(cookie);
+  await saveCookie(configPath, normalizedCookie);
   process.stderr.write("Cookie 已安全保存；后续命令会自动使用该配置。\n");
-  return cookie;
+  return normalizedCookie;
 }
 
 async function getCookie(options: CookieCommandOptions): Promise<string> {
-  const cookie = await findCookie(options);
-  if (cookie) return cookie;
+  const candidate = await findCookie(options);
+  if (candidate) {
+    const cookie = normalizeCandidate(candidate);
+    if (cookie) return cookie;
+    process.stderr.write("已保存的 Cookie 不完整，将重新引导配置。\n");
+  }
   return promptAndSaveCookie();
 }
 
@@ -394,7 +430,7 @@ searchOptions(program.command("search <query>").description("搜索图库并预�
     const optionalNumber = (value: string | undefined, option: string): number | undefined => value === undefined ? undefined : nonNegativeInteger(value, option);
     const result = await searchGalleries({
       query,
-      cookie: await findCookie(options),
+      cookie: await findOptionalCookie(options),
       pages: nonNegativeInteger(options.pages, "--pages"),
       site: options.site as "e-hentai" | "exhentai",
       title: !options.titleOnly,
@@ -424,7 +460,7 @@ previewOptions(program.command("preview <gallery-url>").description("Create a lo
   .action(async (galleryUrl: string, options: PreviewCommandOptions) => {
     const images = nonNegativeInteger(options.images, "--images");
     if (images < 1 || images > 20) throw new Error("--images must be an integer from 1 to 20.");
-    const preview = await getGalleryPreview(galleryUrl, { cookie: await findCookie(options) }, images);
+    const preview = await getGalleryPreview(galleryUrl, { cookie: await findOptionalCookie(options) }, images);
     if (options.json) {
       process.stdout.write(JSON.stringify(preview, null, 2) + "\n");
       return;
@@ -447,14 +483,15 @@ config.command("set-cookie")
       ? await readStandardInput()
       : options.cookieFile
         ? (await readFile(options.cookieFile, "utf8")).trim()
-        : process.env[options.cookieEnv]?.trim() ?? await readHiddenInput("请粘贴 Cookie 后按 Enter（输入不会回显，也不会写入命令历史）：");
+        : process.env[options.cookieEnv]?.trim() ?? await readHiddenInput("请粘贴完整 Cookie（支持多行和 key: value 格式）后按 Enter（输入不会回显，也不会写入命令历史）：");
     if (!cookie) throw new Error(`未找到 Cookie。请先设置 ${options.cookieEnv}，或使用 --cookie-file / --stdin。`);
     await saveCookie(program.opts().config, cookie);
     process.stdout.write(`Cookie 已保存到 ${program.opts().config}\n`);
   });
 config.command("show").description("显示配置状态，不会显示 Cookie 内容").action(async () => {
   const configured = await loadConfig(program.opts().config);
-  process.stdout.write(JSON.stringify({ path: program.opts().config, cookieConfigured: Boolean(configured.cookie) }, null, 2) + "\n");
+  const cookieValid = configured.cookie ? Boolean(normalizeCandidate({ value: configured.cookie, source: "config" })) : false;
+  process.stdout.write(JSON.stringify({ path: program.opts().config, cookieConfigured: cookieValid }, null, 2) + "\n");
 });
 config.command("clear").description("删除已保存的 Cookie").action(async () => {
   await clearCookie(program.opts().config);

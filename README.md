@@ -19,6 +19,8 @@ eharchive --help
 
 首次运行需要登录 Cookie 的命令（如 `download`、`favorites list`）时，工具会自动检查本机配置。若未配置且当前终端可交互，会提示你直接粘贴 Cookie：输入不会回显、不会写入命令历史，并会自动保存供后续命令使用。
 
+可直接粘贴浏览器导出的多行 `key: value` 内容，工具会转换为标准 Cookie 格式。必须包含 `ipb_member_id` 与 `ipb_pass_hash`；只有 `ipb_member_id` 的内容不完整，会被拒绝并重新引导。`igneous: null` 会自动忽略。
+
 默认保存位置固定为 Windows 的 `%APPDATA%\eharchive\config.json`，独立于 npm 的全局安装目录；正常升级或重新安装 CLI 都不会删除它。可随时用下面的命令确认保存位置和状态：
 
 ```powershell

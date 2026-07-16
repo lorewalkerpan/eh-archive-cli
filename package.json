@@ -1,6 +1,6 @@
 {
   "name": "@lorewalkerpan/eh-archive-cli",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Command-line archive downloader for content you are authorized to download.",
   "license": "GPL-3.0-or-later",
   "type": "module",

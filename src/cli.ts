@@ -8,7 +8,7 @@ const program = new Command();
 program
   .name("eharchive")
   .description("Download authorized gallery archives as ZIP files")
-  .version("0.1.0")
+  .version("0.1.1")
   .showHelpAfterError();
 
 program.command("download <gallery-url>")

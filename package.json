@@ -1,11 +1,11 @@
 {
   "name": "@lorewalkerpan/eh-archive-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Command-line archive downloader for content you are authorized to download.",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "bin": {
-    "eharchive": "./dist/src/cli.js"
+    "eharchive": "dist/src/cli.js"
   },
   "exports": {
     ".": "./dist/src/core.js"

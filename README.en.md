@@ -42,6 +42,14 @@ Get-Clipboard | eharchive config set-cookie --stdin
 
 The saved local configuration contains the Cookie. Do not commit or share it; remove it with `eharchive config clear`. Non-interactive environments such as pipes and CI never wait for secret input: save it first with `config set-cookie --stdin`, or use `--cookie-file` temporarily.
 
+## System proxy
+
+The CLI automatically uses `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` from the system environment; no Node flags are required. To force a direct connection for one command, put the root option first:
+
+```powershell
+eharchive --no-proxy favorites list
+```
+
 ## Download
 
 Use a full gallery URL or its compact `ID/Token` form:

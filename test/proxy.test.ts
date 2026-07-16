@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveProxySettings } from "../src/proxy.js";
+import { resolveProxySettings, useProxySetting } from "../src/proxy.js";
 
 test("uses ALL_PROXY when protocol-specific proxies are absent", () => {
   assert.deepEqual(resolveProxySettings({ ALL_PROXY: "http://127.0.0.1:7890", NO_PROXY: "localhost" }), {
@@ -20,4 +20,8 @@ test("prefers lower-case protocol proxy settings", () => {
 
 test("does not configure a dispatcher without a proxy", () => {
   assert.equal(resolveProxySettings({ NO_PROXY: "localhost" }), undefined);
+});
+
+test("direct persisted mode does not install a proxy dispatcher", () => {
+  assert.equal(useProxySetting("direct", { HTTPS_PROXY: "http://127.0.0.1:7890" }), false);
 });

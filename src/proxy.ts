@@ -28,3 +28,12 @@ export function useEnvironmentProxy(environment: Environment = process.env): boo
   setGlobalDispatcher(new EnvHttpProxyAgent(settings));
   return true;
 }
+
+/** Applies a persisted proxy mode: system, direct, or one HTTP(S) proxy URL. */
+export function useProxySetting(setting: string, environment: Environment = process.env): boolean {
+  if (setting === "direct") return false;
+  if (setting === "system") return useEnvironmentProxy(environment);
+  const noProxy = value(environment, "no_proxy", "NO_PROXY");
+  setGlobalDispatcher(new EnvHttpProxyAgent({ httpProxy: setting, httpsProxy: setting, noProxy }));
+  return true;
+}

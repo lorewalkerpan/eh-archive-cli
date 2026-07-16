@@ -67,6 +67,17 @@ eharchive search "keyword" --pages 3 --export .\search-results.txt
 eharchive batch .\search-results.txt --out .\downloads
 ```
 
+## Gallery visual preview
+
+Generate a local HTML page with the gallery cover and the first 20 default EH thumbnails. It references the site's compressed thumbnail URLs only; it does not download original pages or put the CLI Cookie into the HTML file.
+
+```powershell
+eharchive preview "2724315/34536084b4"
+eharchive preview "2724315/34536084b4" --images 12 --out .\previews\my-gallery.html
+```
+
+The generated page is placed under `previews\` by default. Clicking a thumbnail opens its EH gallery-page link in the browser. Use `--json` when only the cover and thumbnail metadata is needed.
+
 ## Batch download
 
 Create a UTF-8 list with one URL or `ID/Token` per line; blank lines and lines beginning with `#` are ignored.

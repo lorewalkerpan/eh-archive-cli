@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { downloadArchive, normalizeGalleryUrl, parseArchiveOffer, parseArchivePageUrl, parseContinuationUrl, parseDirectUrl, parseFavoritesPage, searchGalleries } from "../src/core.js";
+import { downloadArchive, normalizeGalleryUrl, parseArchiveOffer, parseArchivePageUrl, parseContinuationUrl, parseDirectUrl, parseFavoritesPage, parseGalleryPreview, searchGalleries } from "../src/core.js";
 
 test("accepts a compact gallery ID and Token", () => {
   assert.equal(normalizeGalleryUrl("2724315/34536084b4"), "https://e-hentai.org/g/2724315/34536084b4/");
@@ -45,6 +45,25 @@ test("parses favorite categories, gallery references, and pagination", () => {
     title: "Example & Gallery"
   }]);
   assert.equal(result.nextPage, "https://e-hentai.org/favorites.php?favcat=0&next=123-456");
+});
+
+test("parses a cover and the first 20 default gallery thumbnails", () => {
+  const thumbnails = Array.from({ length: 21 }, (_, index) => {
+    const page = index + 1;
+    return `<a href="/s/token-${page}/123-${page}"><div title="Page ${page}: sample.jpg" style="background:url(https://s.exhentai.org/t/${page}.jpg)"></div></a>`;
+  }).join("");
+  const html = `<h1 id="gn">Example &amp; Gallery</h1><div id="gd1"><div style="background:url(https://s.exhentai.org/t/cover.jpg)"></div></div><div id="gdt">${thumbnails}</div>`;
+  const result = parseGalleryPreview(html, "https://e-hentai.org/g/123/token/");
+  assert.equal(result.title, "Example & Gallery");
+  assert.equal(result.coverUrl, "https://s.exhentai.org/t/cover.jpg");
+  assert.equal(result.thumbnails.length, 20);
+  assert.deepEqual(result.thumbnails[0], {
+    page: 1,
+    pageUrl: "https://e-hentai.org/s/token-1/123-1",
+    thumbnailUrl: "https://s.exhentai.org/t/1.jpg",
+    label: "Page 1: sample.jpg"
+  });
+  assert.throws(() => parseGalleryPreview(html, "https://e-hentai.org/g/123/token/", 21), /1 to 20/);
 });
 
 test("rejects invalid search options before making a request", async () => {

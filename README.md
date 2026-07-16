@@ -81,6 +81,17 @@ eharchive search "关键词" --pages 3 --export .\search-results.txt
 eharchive batch .\search-results.txt --out .\downloads
 ```
 
+## 图库可视化预览
+
+`preview` 会生成一个本地 HTML 页面，展示图库封面和 EH 默认第一页的前 20 张压缩缩略图。它只引用站点缩略图地址：不会下载原始页面，也不会把 CLI 的 Cookie 写进 HTML 文件。
+
+```powershell
+eharchive preview "2724315/34536084b4"
+eharchive preview "2724315/34536084b4" --images 12 --out .\previews\my-gallery.html
+```
+
+默认文件位于 `previews\`。点击缩略图会在浏览器打开对应的 EH 图片页；只需要封面和缩略图元数据时可用 `--json`。
+
 ## 批量下载与失败重试
 
 新建 UTF-8 文本文件 `galleries.txt`；每行一个完整图库 URL 或 `ID/Token`，空行与 `#` 开头的注释会忽略：

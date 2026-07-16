@@ -66,6 +66,20 @@ export interface SearchResult {
   pagesFetched: number;
 }
 
+export interface GalleryThumbnail {
+  page: number;
+  pageUrl: string;
+  thumbnailUrl: string;
+  label: string;
+}
+
+export interface GalleryPreview {
+  galleryUrl: string;
+  title: string;
+  coverUrl?: string;
+  thumbnails: GalleryThumbnail[];
+}
+
 const defaultUserAgent = "eh-archive-cli (+https://github.com/lorewalkerpan/eh-archive-cli)";
 const galleryHosts = new Set(["e-hentai.org", "exhentai.org"]);
 
@@ -92,6 +106,18 @@ function assertGalleryUrl(url: URL): void {
   if (!/^\/g\/\d+\/[a-z0-9]+\/?$/i.test(url.pathname)) {
     throw new Error("Gallery URL must have the form https://e-hentai.org/g/ID/Token/.");
   }
+}
+
+function isThumbnailHost(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  return host === "ehgt.org" || host.endsWith(".ehgt.org") || host.endsWith(".e-hentai.org") || host.endsWith(".exhentai.org");
+}
+
+function cssBackgroundUrl(value: string, baseUrl: string): string | undefined {
+  const match = /url\(\s*["']?([^"')\s]+)["']?\s*\)/i.exec(value);
+  if (!match) return undefined;
+  const url = absoluteUrl(match[1], baseUrl);
+  return isThumbnailHost(new URL(url)) ? url : undefined;
 }
 
 /** Converts the compact `gallery-id/token` form into a normal gallery URL. */
@@ -142,6 +168,36 @@ export function parseGalleryPreviewItems(html: string, baseUrl: string): Gallery
     items.push({ id, token, url, title });
   }
   return items;
+}
+
+/** Parses the cover and the gallery page's default first-page thumbnail grid. */
+export function parseGalleryPreview(html: string, baseUrl: string, limit = 20): Omit<GalleryPreview, "galleryUrl"> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error("Preview image count must be an integer from 1 to 20.");
+  const titleHtml = /<h1\b[^>]*\bid=["']gn["'][^>]*>([\s\S]*?)<\/h1>/i.exec(html)?.[1];
+  const title = textFromHtml(titleHtml ?? "") || "Untitled gallery";
+  const coverBlock = /<div\b[^>]*\bid=["']gd1["'][^>]*>[\s\S]{0,3000}?<\/div>/i.exec(html)?.[0] ?? "";
+  const coverUrl = cssBackgroundUrl(coverBlock, baseUrl);
+  const thumbnails: GalleryThumbnail[] = [];
+  const seen = new Set<string>();
+  const thumbnailPattern = /<a\b[^>]*\bhref=["']([^"']*\/s\/[^"']*\/\d+-(\d+)[^"']*)["'][^>]*>([\s\S]{0,2000}?)<\/a>/gi;
+  for (const match of html.matchAll(thumbnailPattern)) {
+    if (thumbnails.length >= limit) break;
+    const pageUrl = absoluteUrl(match[1], baseUrl);
+    if (!isGalleryHost(new URL(pageUrl)) || seen.has(pageUrl)) continue;
+    const thumbnailUrl = cssBackgroundUrl(match[3], baseUrl);
+    if (!thumbnailUrl) continue;
+    const page = Number(match[2]);
+    const label = textFromHtml(/\btitle=["']([^"']*)["']/i.exec(match[3])?.[1] ?? `Page ${page}`);
+    seen.add(pageUrl);
+    thumbnails.push({ page, pageUrl, thumbnailUrl, label: label || `Page ${page}` });
+  }
+  return { title, coverUrl, thumbnails };
+}
+
+export async function getGalleryPreview(galleryReference: string, options: ResolveOptions = {}, limit = 20): Promise<GalleryPreview> {
+  const galleryUrl = normalizeGalleryUrl(galleryReference);
+  const page = await getText(galleryUrl, options, galleryUrl);
+  return { galleryUrl: page.url, ...parseGalleryPreview(page.html, page.url, limit) };
 }
 
 export function parseFavoritesPage(html: string, baseUrl: string): { categories: FavoriteCategory[]; items: FavoriteItem[]; nextPage?: string } {

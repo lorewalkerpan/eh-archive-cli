@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import { normalizeGalleryUrl, parseArchiveOffer, parseArchivePageUrl, parseContinuationUrl, parseDirectUrl } from "../src/core.js";
+import { downloadArchive, normalizeGalleryUrl, parseArchiveOffer, parseArchivePageUrl, parseContinuationUrl, parseDirectUrl } from "../src/core.js";
 
 test("accepts a compact gallery ID and Token", () => {
   assert.equal(normalizeGalleryUrl("2724315/34536084b4"), "https://e-hentai.org/g/2724315/34536084b4/");
   assert.throws(() => normalizeGalleryUrl("2724315"), /also needs its Token/);
+  assert.throws(() => normalizeGalleryUrl("https://example.test/g/1/token/"), /must use e-hentai.org or exhentai.org/);
 });
 
 test("parses the archive popup URL", () => {
@@ -21,4 +27,44 @@ test("parses original and resampled form actions", () => {
 test("parses continuation and direct ZIP URLs", () => {
   assert.equal(parseContinuationUrl(`<script>document.location = "/continue/1"</script>`, "https://example.test/archiver.php"), "https://example.test/continue/1");
   assert.equal(parseDirectUrl(`<a href="/archive.zip">Click Here To Start Downloading</a>`, "https://example.test/continue/1"), "https://example.test/archive.zip");
+});
+
+test("retries and resumes a ZIP download without forwarding the Cookie", async () => {
+  let requests = 0;
+  let cookieHeader: string | undefined;
+  const server = createServer((request, response) => {
+    requests += 1;
+    cookieHeader = request.headers.cookie;
+    assert.equal(request.headers.range, "bytes=6-");
+    if (requests === 1) {
+      response.writeHead(503).end();
+      return;
+    }
+    response.writeHead(206, {
+      "content-length": "5",
+      "content-range": "bytes 6-10/11"
+    }).end("world");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address !== "string");
+
+  const directory = await mkdtemp(join(tmpdir(), "eharchive-download-"));
+  const output = join(directory, "archive.zip");
+  await writeFile(`${output}.part`, "hello ");
+  try {
+    const result = await downloadArchive(`http://127.0.0.1:${address.port}/archive.zip`, output, {
+      cookie: "member_id=secret",
+      retries: 1,
+      timeoutMs: 1_000
+    });
+    assert.equal(result, "downloaded");
+    assert.equal(await readFile(output, "utf8"), "hello world");
+    assert.equal(requests, 2);
+    assert.equal(cookieHeader, undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+    server.close();
+  }
 });

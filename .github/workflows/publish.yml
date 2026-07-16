@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -24,4 +26,9 @@ jobs:
       - run: node --version && npm --version
       - run: npm ci
       - run: npm test
+      - name: Verify package version matches the Release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node --input-type=module -e 'import { readFileSync } from "node:fs"; const { version } = JSON.parse(readFileSync("package.json", "utf8")); if (`v${version}` !== process.env.RELEASE_TAG) throw new Error(`Release ${process.env.RELEASE_TAG} does not match package version ${version}`);'
       - run: npm publish --access public

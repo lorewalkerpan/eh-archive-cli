@@ -65,6 +65,22 @@ eharchive download "2724315/34536084b4" --out .\downloads
 
 下载先写入 `.part`。出现网络中断时保留该文件，下次默认从断点续传；只有完整下载成功后才替换正式 ZIP。登录 Cookie 只发送给受信任的图库域名，不会随 ZIP 直链发出。
 
+## 搜索预览
+
+搜索只显示结果，不会自动下载。默认搜索标题和标签；无需 Cookie 也可预览公开搜索结果。
+
+```powershell
+eharchive search "artist:example" --pages 2
+eharchive search "关键词" --title-only --min-rating 3 --json
+```
+
+可使用 `--description`、`--torrents`、`--min-pages`、`--max-pages` 扩展筛选。导出结果后再确认批量下载：
+
+```powershell
+eharchive search "关键词" --pages 3 --export .\search-results.txt
+eharchive batch .\search-results.txt --out .\downloads
+```
+
 ## 批量下载与失败重试
 
 新建 UTF-8 文本文件 `galleries.txt`；每行一个完整图库 URL 或 `ID/Token`，空行与 `#` 开头的注释会忽略：

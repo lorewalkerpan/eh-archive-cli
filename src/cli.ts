@@ -4,7 +4,7 @@ import { basename, dirname, resolve } from "node:path";
 import { Command } from "commander";
 import { AdaptiveLimiter, type AdaptiveEvent, type AdaptiveSnapshot } from "./adaptive.js";
 import { clearCookie, defaultConfigPath, loadConfig, saveCookie } from "./config.js";
-import { downloadArchive, listFavorites, normalizeGalleryUrl, resolveArchive, type ArchiveKind } from "./core.js";
+import { downloadArchive, listFavorites, normalizeGalleryUrl, resolveArchive, searchGalleries, type ArchiveKind } from "./core.js";
 
 type CookieCommandOptions = {
   cookieEnv: string;
@@ -48,7 +48,7 @@ const program = new Command();
 program
   .name("eharchive")
   .description("下载你有权访问的图库归档 ZIP")
-  .version("0.4.0")
+  .version("0.5.0")
   .option("--config <path>", "本机 Cookie 配置文件路径", defaultConfigPath())
   .showHelpAfterError();
 
@@ -76,7 +76,7 @@ function positiveSeconds(value: string, option: string): number {
   return parsed;
 }
 
-async function getCookie(options: CookieCommandOptions): Promise<string> {
+async function findCookie(options: CookieCommandOptions): Promise<string | undefined> {
   if (options.cookieFile) {
     const cookie = (await readFile(options.cookieFile, "utf8")).trim();
     if (cookie) return cookie;
@@ -86,6 +86,12 @@ async function getCookie(options: CookieCommandOptions): Promise<string> {
   if (fromEnvironment) return fromEnvironment;
   const configured = await loadConfig(program.opts().config);
   if (configured.cookie) return configured.cookie;
+  return undefined;
+}
+
+async function getCookie(options: CookieCommandOptions): Promise<string> {
+  const cookie = await findCookie(options);
+  if (cookie) return cookie;
   throw new Error("没有可用 Cookie。运行 `eharchive config set-cookie --cookie-env EH_COOKIE`，或使用 --cookie-file。");
 }
 
@@ -154,6 +160,22 @@ function favoritesOptions(command: Command): Command {
     .option("--all", "读取全部页面（最多 100 页）")
     .option("--search <keyword>", "按名称、标签和笔记搜索")
     .option("--site <site>", "e-hentai 或 exhentai", "e-hentai")
+    .option("--json", "以 JSON 输出")
+    .option("--export <path>", "导出为可传给 batch 的 ID/Token 清单");
+}
+
+function searchOptions(command: Command): Command {
+  return command
+    .option("--cookie-env <variable>", "可选的 Cookie 环境变量名", "EH_COOKIE")
+    .option("--cookie-file <path>", "可选的 Cookie UTF-8 文件")
+    .option("--pages <count>", "预览的最多页数", "1")
+    .option("--site <site>", "e-hentai 或 exhentai", "e-hentai")
+    .option("--title-only", "只搜索标题，不搜索标签")
+    .option("--description", "同时搜索描述")
+    .option("--torrents", "同时搜索种子名称")
+    .option("--min-rating <0-5>", "最低评分")
+    .option("--min-pages <count>", "最少页数")
+    .option("--max-pages <count>", "最多页数")
     .option("--json", "以 JSON 输出")
     .option("--export <path>", "导出为可传给 batch 的 ID/Token 清单");
 }
@@ -276,6 +298,36 @@ favoritesOptions(favorites.command("list").description("查看当前账号的云
     }
     for (const item of result.items) process.stdout.write(`${item.id}/${item.token}\t${item.title}\n`);
     process.stderr.write(`已读取 ${result.pagesFetched} 页、${result.items.length} 项${result.nextPage ? "；还有下一页，可提高 --pages 或使用 --all" : ""}。\n`);
+  });
+
+searchOptions(program.command("search <query>").description("搜索图库并预览结果；不会自动下载"))
+  .action(async (query: string, options: CookieCommandOptions & { pages: string; site: string; titleOnly?: boolean; description?: boolean; torrents?: boolean; minRating?: string; minPages?: string; maxPages?: string; json?: boolean; export?: string }) => {
+    const optionalNumber = (value: string | undefined, option: string): number | undefined => value === undefined ? undefined : nonNegativeInteger(value, option);
+    const result = await searchGalleries({
+      query,
+      cookie: await findCookie(options),
+      pages: nonNegativeInteger(options.pages, "--pages"),
+      site: options.site as "e-hentai" | "exhentai",
+      title: !options.titleOnly,
+      tags: !options.titleOnly,
+      description: options.description,
+      torrents: options.torrents,
+      minRating: optionalNumber(options.minRating, "--min-rating"),
+      minPages: optionalNumber(options.minPages, "--min-pages"),
+      maxPages: optionalNumber(options.maxPages, "--max-pages")
+    });
+    if (options.export) {
+      const outputPath = resolve(options.export);
+      await mkdir(dirname(outputPath), { recursive: true });
+      await writeFile(outputPath, result.items.map((item) => `${item.id}/${item.token}`).join("\n") + (result.items.length ? "\n" : ""), "utf8");
+      process.stderr.write(`已导出 ${result.items.length} 项到：${outputPath}\n`);
+    }
+    if (options.json) {
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      return;
+    }
+    for (const item of result.items) process.stdout.write(`${item.id}/${item.token}\t${item.title}\n`);
+    process.stderr.write(`已预览 ${result.pagesFetched} 页、${result.items.length} 项。\n`);
   });
 
 const config = program.command("config").description("管理本机 Cookie 配置（Cookie 不会打印到终端）");

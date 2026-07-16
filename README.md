@@ -83,6 +83,7 @@ eharchive batch .\galleries.txt --quality original --out .\downloads --concurren
 
 - `--concurrency 1` 到 `8`：并行任务数，默认 `2`。
 - `--delay <秒>`：每次任务启动之间的最小间隔，默认 `1`；建议保留或提高该值。
+- 默认开启自适应并发：检测到 `429`、`503`、超时等限流迹象时，会自动降并发并冷却；连续成功后逐步恢复。可用 `--no-adaptive` 关闭。
 - `--report <文件>`：生成不含 Cookie 的 JSON 报告，记录下载、跳过与失败项目。
 - 单项失败不会停止其余任务，命令会以非零状态码提示存在失败。
 

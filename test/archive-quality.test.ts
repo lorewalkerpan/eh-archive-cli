@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { archiveAttempts, canFallBackToResampled, defaultArchiveFilename, parseArchiveQuality } from "../src/archive-quality.js";
+import { archiveAttempts, canFallBackToResampled, defaultArchiveFilename, parseArchiveQuality, sanitizeArchiveTitle } from "../src/archive-quality.js";
 
 test("recognizes archive quality choices and auto fallback order", () => {
   assert.equal(parseArchiveQuality("original"), "original");
@@ -12,9 +12,10 @@ test("recognizes archive quality choices and auto fallback order", () => {
   assert.deepEqual(archiveAttempts("auto"), ["original", "resampled"]);
 });
 
-test("uses bracketed quality in default archive names", () => {
-  assert.equal(defaultArchiveFilename("https://e-hentai.org/g/2724315/34536084b4/", "original"), "2724315 [original].zip");
-  assert.equal(defaultArchiveFilename("https://exhentai.org/g/8/token/", "resampled"), "8 [resampled].zip");
+test("uses title, gallery ID, and bracketed quality in default archive names", () => {
+  assert.equal(defaultArchiveFilename("https://e-hentai.org/g/2724315/34536084b4/", "original", "Example Gallery"), "Example Gallery [2724315] [original].zip");
+  assert.equal(defaultArchiveFilename("https://exhentai.org/g/8/token/", "resampled", "Name: A/B?"), "Name A B [8] [resampled].zip");
+  assert.equal(sanitizeArchiveTitle("  .  "), "Untitled gallery");
 });
 
 test("only falls back when the original archive offer is unavailable", () => {

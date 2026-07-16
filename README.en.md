@@ -79,6 +79,19 @@ To force a direct connection for one command, put the root option first:
 eharchive --no-proxy favorites list
 ```
 
+## Logging
+
+Simple logging is enabled by default: command start, completion, failures, and network errors are recorded. The log file is stored beside the configuration file at `%APPDATA%\eharchive\eharchive.log`. Cookie values are never written to logs.
+
+```powershell
+eharchive config set-log simple    # concise logs (default)
+eharchive config set-log verbose   # detailed request statuses and retry events
+eharchive config set-log none      # disable disk logging
+eharchive config show              # show level and log path
+```
+
+Preview, search, favorites, single downloads, and batch downloads share the same logging policy. Detailed mode redacts Cookie fields; use `none` when request records should not remain on disk.
+
 ## Download
 
 Use a full gallery URL or its compact `ID/Token` form:
@@ -170,6 +183,7 @@ Favorites output and exported lists never contain the Cookie. This command is re
 | Use system proxy | `eharchive config set-proxy system` |
 | Persist direct connections | `eharchive config set-proxy direct` |
 | Bypass proxy once | `eharchive --no-proxy <command>` |
+| Set log level | `eharchive config set-log simple|verbose|none` |
 | Export favorites for download | `eharchive favorites list --all --export .\favorites.txt` |
 | Search, then download | `eharchive search "keyword" --export .\results.txt`, then `eharchive batch .\results.txt` |
 

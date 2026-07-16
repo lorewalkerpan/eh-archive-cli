@@ -80,6 +80,19 @@ eharchive config show
 eharchive --no-proxy favorites list
 ```
 
+## 日志
+
+默认记录简要日志：命令开始、完成、失败以及网络错误。日志文件位于配置文件同目录：`%APPDATA%\eharchive\eharchive.log`。日志不会记录 Cookie 内容。
+
+```powershell
+eharchive config set-log simple    # 简要日志（默认）
+eharchive config set-log verbose   # 详细日志，增加请求状态和重试信息
+eharchive config set-log none      # 完全关闭日志
+eharchive config show              # 查看级别和日志路径
+```
+
+预览、搜索、收藏、单本下载和批量下载共用同一日志策略。详细日志会隐藏 Cookie 字段；如果不希望在磁盘留下请求记录，可设为 `none`。
+
 无需保存 Cookie 时，可在每次执行中使用环境变量或文件：
 
 ```powershell
@@ -198,6 +211,7 @@ eharchive batch .\favorites-0.txt --out .\downloads --concurrency 2
 | 使用系统代理 | `eharchive config set-proxy system` |
 | 持久化直连 | `eharchive config set-proxy direct` |
 | 单次直连 | `eharchive --no-proxy <命令>` |
+| 设置日志级别 | `eharchive config set-log simple|verbose|none` |
 | 查看收藏并导出下载列表 | `eharchive favorites list --all --export .\favorites.txt` |
 | 搜索后再下载 | `eharchive search "关键词" --export .\results.txt` 后执行 `eharchive batch .\results.txt` |
 

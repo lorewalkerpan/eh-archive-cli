@@ -3,9 +3,10 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { Command } from "commander";
 import { AdaptiveLimiter, type AdaptiveEvent, type AdaptiveSnapshot } from "./adaptive.js";
-import { clearCookie, defaultConfigPath, loadConfig, normalizeCookieInput, saveCookie, saveProxy } from "./config.js";
+import { clearCookie, defaultConfigPath, loadConfig, normalizeCookieInput, saveCookie, saveLogLevel, saveProxy } from "./config.js";
 import { downloadArchive, getGalleryPreview, listFavorites, normalizeGalleryUrl, resolveArchive, searchGalleries, type ArchiveKind, type GalleryPreview } from "./core.js";
 import { useProxySetting } from "./proxy.js";
+import { configureLogging, defaultLogPath, logError, logInfo } from "./log.js";
 
 type CookieCommandOptions = {
   cookieEnv: string;
@@ -60,7 +61,7 @@ const program = new Command();
 program
   .name("eharchive")
   .description("下载你有权访问的图库归档 ZIP")
-  .version("0.9.2")
+  .version("0.9.3")
   .option("--config <path>", "本机 Cookie 配置文件路径", defaultConfigPath())
   .option("--no-proxy", "不使用系统或环境代理，改为直接连接")
   .showHelpAfterError();
@@ -68,12 +69,16 @@ program
 let networkConfigured = false;
 const networkCommands = new Set(["download", "batch", "retry", "list", "search", "preview"]);
 program.hook("preAction", async (_thisCommand, actionCommand) => {
-  if (!networkCommands.has(actionCommand.name())) return;
-  if (networkConfigured) return;
+  const configured = await loadConfig(program.opts().config);
+  configureLogging(program.opts().config, configured.logLevel ?? "simple");
+  logInfo(`command started: ${actionCommand.name()}`);
+  if (!networkCommands.has(actionCommand.name()) || networkConfigured) return;
   networkConfigured = true;
   if (program.opts().proxy === false) return;
-  const configured = await loadConfig(program.opts().config);
   useProxySetting(configured.proxy ?? "system");
+});
+program.hook("postAction", (_thisCommand, actionCommand) => {
+  logInfo(`command completed: ${actionCommand.name()}`);
 });
 
 function qualityOption(command: Command): Command {
@@ -516,10 +521,22 @@ config.command("set-proxy <mode-or-url>")
     const proxy = await saveProxy(program.opts().config, modeOrUrl);
     process.stdout.write(`代理已保存为 ${proxy}\n`);
   });
+config.command("set-log <level>")
+  .description("持久化日志级别：simple、verbose 或 none")
+  .action(async (level: string) => {
+    const normalized = level.trim().toLowerCase();
+    if (normalized !== "simple" && normalized !== "verbose" && normalized !== "none") {
+      throw new Error("Log level must be simple, verbose, or none.");
+    }
+    await saveLogLevel(program.opts().config, normalized);
+    configureLogging(program.opts().config, normalized);
+    logInfo(`log level changed to ${normalized}`);
+    process.stdout.write(`日志级别已保存为 ${normalized}\n`);
+  });
 config.command("show").description("显示配置状态，不会显示 Cookie 内容").action(async () => {
   const configured = await loadConfig(program.opts().config);
   const cookieValid = configured.cookie ? Boolean(normalizeCandidate({ value: configured.cookie, source: "config" })) : false;
-  process.stdout.write(JSON.stringify({ path: program.opts().config, cookieConfigured: cookieValid, proxy: configured.proxy ?? "system" }, null, 2) + "\n");
+  process.stdout.write(JSON.stringify({ path: program.opts().config, cookieConfigured: cookieValid, proxy: configured.proxy ?? "system", logLevel: configured.logLevel ?? "simple", logPath: defaultLogPath(program.opts().config) }, null, 2) + "\n");
 });
 config.command("clear").description("删除已保存的 Cookie").action(async () => {
   await clearCookie(program.opts().config);
@@ -527,6 +544,7 @@ config.command("clear").description("删除已保存的 Cookie").action(async ()
 });
 
 program.parseAsync().catch((error: Error) => {
+  logError(error.message);
   process.stderr.write(`错误：${error.message}\n`);
   process.exitCode = 1;
 });

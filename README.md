@@ -38,6 +38,14 @@ eharchive download "https://example.invalid/g/123/token/" --cookie-file .\cookie
 eharchive download "https://example.invalid/g/123/token/" --quality original --out .\downloads
 ```
 
+完整 URL 也可简写为 `图库 ID/Token`，例如：
+
+```powershell
+eharchive download "2724315/34536084b4" --out .\downloads
+```
+
+不能只提供纯数字 ID：站点还要求对应的 Token；只有 ID 的路径会返回 404。批量清单中同样可以混用完整 URL 和 `ID/Token`。
+
 - `--quality original|resampled`：选择原图或压缩版本。
 - `--out <目录>`：输出目录，默认 `downloads`。
 - `--name <文件名>`：自定义 ZIP 文件名。

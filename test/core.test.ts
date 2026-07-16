@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseArchiveOffer, parseArchivePageUrl, parseContinuationUrl, parseDirectUrl } from "../src/core.js";
+import { normalizeGalleryUrl, parseArchiveOffer, parseArchivePageUrl, parseContinuationUrl, parseDirectUrl } from "../src/core.js";
+
+test("accepts a compact gallery ID and Token", () => {
+  assert.equal(normalizeGalleryUrl("2724315/34536084b4"), "https://e-hentai.org/g/2724315/34536084b4/");
+  assert.throws(() => normalizeGalleryUrl("2724315"), /also needs its Token/);
+});
 
 test("parses the archive popup URL", () => {
   const html = `<a onclick="return popUp('https://example.test/archiver.php?gid=1&amp;token=x',480,320)">Archive Download</a>`;

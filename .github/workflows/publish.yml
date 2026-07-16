@@ -19,6 +19,9 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+      # npm Trusted Publishing requires npm 11.5.1 or newer for OIDC support.
+      - run: npm install --global npm@^11.5.1
+      - run: node --version && npm --version
       - run: npm ci
       - run: npm test
       - run: npm publish --access public
